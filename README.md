@@ -45,7 +45,15 @@ Flow on every push/merge to `main`:
 ```bash
 git clone https://github.com/tekneeq/eeehoc.git ~/eeehoc
 cd ~/eeehoc
-chmod +x deploy.sh restart.sh scripts/docker-entrypoint.sh
+chmod +x deploy.sh restart.sh scripts/docker-entrypoint.sh scripts/install-docker-amazon-linux.sh
+./deploy.sh
+```
+
+`./deploy.sh` installs Docker on a fresh Amazon Linux box (`dnf`/`yum install docker`), starts the daemon, and adds `ec2-user` to the `docker` group. The same shell uses `sudo docker` until you log out and back in. You can also install it by hand first:
+
+```bash
+./scripts/install-docker-amazon-linux.sh
+newgrp docker
 ./deploy.sh
 ```
 

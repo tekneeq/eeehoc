@@ -54,5 +54,5 @@ jobs:
             cd "$APP_DIR"
             # Pull first so deploy.sh / restart.sh from this push are what we run.
             git pull --ff-only origin main
-            chmod +x deploy.sh restart.sh scripts/docker-entrypoint.sh
+            chmod +x deploy.sh restart.sh scripts/docker-entrypoint.sh scripts/install-docker-amazon-linux.sh
             ./deploy.sh
