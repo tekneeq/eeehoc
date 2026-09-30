@@ -113,13 +113,42 @@ if command -v systemctl >/dev/null 2>&1; then
     }
 fi
 
+# Amazon Linux keeps SELinux enforcing. nginx (httpd_t) cannot open a
+# connection to :8083 until this boolean is on, so :80/health is 502
+# while curl to the container itself still returns ok.
+allow_nginx_proxy() {
+    if ! command -v getenforce >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$(getenforce)" = "Disabled" ]; then
+        return 0
+    fi
+    if ! command -v setsebool >/dev/null 2>&1; then
+        log "WARNING: SELinux is on but setsebool is missing; nginx may not reach :8083"
+        return 0
+    fi
+    if getsebool httpd_can_network_connect 2>/dev/null | grep -q ' on$'; then
+        log "selinux: httpd_can_network_connect already on"
+        return 0
+    fi
+    log "selinux: allowing nginx to proxy to :8083 (httpd_can_network_connect)"
+    setsebool -P httpd_can_network_connect 1
+}
+
+allow_nginx_proxy
+
 log "http://<host>/ → eeehoc :8083  (/health → container /health)"
 
 if curl -fsS http://127.0.0.1/health >/dev/null 2>&1; then
     log "health via :80: $(curl -fsS http://127.0.0.1/health | tr -d '\n')"
 else
-    log "WARNING: curl http://127.0.0.1/health failed — is eeehoc-dashboard up on :8083?"
+    log "WARNING: nginx :80 did not proxy /health (container :8083 can still be fine)"
+    curl -sS -o /dev/null -w "  :80 status %{http_code}\n" http://127.0.0.1/health || true
     docker ps --filter name=eeehoc-dashboard --format '{{.Names}} {{.Status}}' 2>/dev/null || true
     curl -fsS http://127.0.0.1:8083/health || true
     echo
+    if [ -f /var/log/nginx/error.log ]; then
+        log "last nginx errors:"
+        tail -n 15 /var/log/nginx/error.log || true
+    fi
 fi
