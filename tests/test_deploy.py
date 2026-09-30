@@ -29,11 +29,20 @@ def test_deploy_sh_healthchecks_8083():
 
 def test_restart_sh_recreates_container_on_8083():
     text = (ROOT / "restart.sh").read_text()
-    assert "docker build" in text
-    assert "docker rm -f eeehoc-dashboard" in text
+    assert "ensure_docker" in text
+    assert "docker_cmd build" in text
+    assert "docker_cmd rm -f eeehoc-dashboard" in text
     assert "-p 8083:8083" in text
     assert "--restart unless-stopped" in text
     assert "8082" not in text
+
+
+def test_install_docker_script_covers_amazon_linux():
+    text = (ROOT / "scripts/install-docker-amazon-linux.sh").read_text()
+    assert "dnf install -y docker" in text
+    assert "yum install -y docker" in text
+    assert "systemctl enable --now docker" in text
+    assert "usermod -aG docker" in text
 
 
 def test_nginx_routes_port_80_to_dashboard():

@@ -15,6 +15,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# shellcheck source=scripts/docker-on-host.sh
+source "$(dirname "$0")/scripts/docker-on-host.sh"
+ensure_docker
+
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] $*"; }
 
@@ -24,7 +28,7 @@ log "1/2  rebuild dashboard container (git pull + docker build/run)"
 ./restart.sh
 
 sleep 3
-if ! docker ps --format '{{.Names}}' | grep -qx eeehoc-dashboard; then
+if ! docker_cmd ps --format '{{.Names}}' | grep -qx eeehoc-dashboard; then
     log "ERROR: eeehoc-dashboard container is not running after restart.sh"
     exit 1
 fi
@@ -37,11 +41,11 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     fi
     if [ "$i" -eq 10 ]; then
         log "ERROR: /health did not respond after restart"
-        docker logs --tail 80 eeehoc-dashboard || true
+        docker_cmd logs --tail 80 eeehoc-dashboard || true
         exit 1
     fi
     sleep 2
 done
 
 log "=== deploy done (rev=$(git rev-parse --short HEAD)) ==="
-docker ps --filter name=eeehoc-dashboard --format '{{.Names}} {{.Status}} {{.Image}}'
+docker_cmd ps --filter name=eeehoc-dashboard --format '{{.Names}} {{.Status}} {{.Image}}'
