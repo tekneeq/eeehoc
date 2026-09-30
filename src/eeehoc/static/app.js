@@ -58,7 +58,13 @@
     if (!iso) return "TBD";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "TBD";
-    return d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    // NHL faceoffs are published in Eastern time, same as the ESPN slate.
+    return d.toLocaleString("en-US", {
+      weekday: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "America/New_York",
+    });
   }
 
   function fmtUpdated(epoch) {
@@ -196,6 +202,9 @@
     if (game.state === "post") {
       return `<span class="status final">${esc(game.period_label || "Final")}</span>`;
     }
+    if (/postponed|canceled|delayed|suspended/i.test(game.period_label || "")) {
+      return `<span class="status pre">${esc(game.period_label)}</span>`;
+    }
     return `<span class="status pre">${esc(fmtKickoff(game.date))}</span>`;
   }
 
@@ -324,7 +333,6 @@
       const gA = game.away.goalie;
       const gH = game.home.goalie;
       if (gA || gH) preBits.push(`${gA || "TBD"} vs ${gH || "TBD"}`);
-      if (game.status_detail) preBits.push(game.status_detail);
       if (game.venue) preBits.push(game.venue);
     }
     const headBits = [game.broadcast, game.state === "pre" ? "" : game.venue, ...(game.notes || [])].filter(Boolean);
@@ -366,9 +374,13 @@
         ${expanded ? starLines(game) : ""}
         ${expanded ? linescore(game) : ""}
         ${preBits.length ? `<div class="pre-note">${esc(preBits.join(" · "))}</div>` : ""}
-        <footer class="chiclet-foot">
-          <button type="button" class="mini toggle" data-act="toggle">${expanded ? "Less" : "More"}</button>
-        </footer>
+        ${
+          game.state === "pre"
+            ? ""
+            : `<footer class="chiclet-foot">
+                 <button type="button" class="mini toggle" data-act="toggle">${expanded ? "Less" : "More"}</button>
+               </footer>`
+        }
       </article>`;
   }
 

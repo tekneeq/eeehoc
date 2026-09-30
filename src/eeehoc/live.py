@@ -502,6 +502,10 @@ def normalize_event(event: dict[str, Any], *, ot_seconds: int = 300, playoffs: b
             home["winner"] = True
         elif away["score"] > home["score"]:
             away["winner"] = True
+    # Scoreboard "leaders" on a game that has not started are season totals, not this game.
+    if state == "pre":
+        home["leaders"] = {}
+        away["leaders"] = {}
     period = _int(status.get("period"))
     clock_seconds = _float(status.get("clock"))
     notes = []

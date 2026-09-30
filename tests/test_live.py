@@ -102,6 +102,14 @@ LIVE_SCOREBOARD = {
                                 "logo": "https://a.espncdn.com/i/teamlogos/nhl/500/col.png",
                             },
                             "records": [{"type": "total", "summary": "0-0-0"}],
+                            "leaders": [
+                                {
+                                    "name": "goals",
+                                    "leaders": [
+                                        {"displayValue": "12", "athlete": {"shortName": "N. MacKinnon"}, "team": {"id": "17"}}
+                                    ],
+                                }
+                            ],
                             "probables": [
                                 {
                                     "name": "probableStartingGoalie",
@@ -394,6 +402,8 @@ def test_normalize_scoreboard_orders_live_first():
     assert upcoming["minute"] is None
     assert upcoming["period_label"] == "9/30 - 7:00 PM EDT"
     assert upcoming["home"]["goalie"] == "A. Georgiev"
+    assert upcoming["home"]["leaders"] == {}
+    assert upcoming["away"]["leaders"] == {}
     assert upcoming["away"]["goalie"] == "J. Oettinger"
     assert upcoming["situation"] is None
 
