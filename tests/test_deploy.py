@@ -71,6 +71,8 @@ def test_install_nginx_script_starts_inactive_unit():
     assert "systemctl start nginx" in text
     assert "disable_nginx_default_80.py" in text
     assert "8083" in text
+    assert "httpd_can_network_connect" in text
+    assert "setsebool -P httpd_can_network_connect 1" in text
 
 
 def test_disable_amazon_linux_padded_listen_80():

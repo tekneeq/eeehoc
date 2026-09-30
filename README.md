@@ -68,6 +68,13 @@ cd ~/eeehoc
 # CERTBOT_EMAIL=you@example.com ./scripts/enable-https.sh --www
 ```
 
+Amazon Linux leaves SELinux enforcing, and nginx cannot open a connection to `:8083` until `httpd_can_network_connect` is on. The install script sets that boolean. If `:8083/health` is `ok` but `:80/health` is a 502, run:
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+curl -fsS http://127.0.0.1/health
+```
+
 Browsers type `eeehoc.com` as **https://** first. Until `:443` has a cert, the domain looks down while `http://<public-ip>/` still works. Override the name with `EEEHOC_DOMAIN` if DNS is not `eeehoc.com`.
 
 Checklist if the domain fails in a browser:
