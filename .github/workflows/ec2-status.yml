@@ -1,0 +1,41 @@
+# One-shot SSH diagnostics for the eeehoc dashboard box (no rebuild).
+name: EC2 status
+
+on:
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Container / git / health
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT || 22 }}
+          command_timeout: 8m
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then APP_DIR="$HOME/eeehoc"; fi
+            cd "$APP_DIR"
+            echo "=== host time ==="
+            date
+            echo "=== container ==="
+            docker ps --filter name=eeehoc-dashboard --format '{{.Names}} {{.Status}} {{.Image}}'
+            echo "=== git ==="
+            git rev-parse --short HEAD
+            git log -1 --format='%h %ci %s'
+            echo "=== health :8083 ==="
+            curl -fsS http://127.0.0.1:8083/health || echo "(container health failed)"
+            echo "=== health :80 ==="
+            curl -fsS http://127.0.0.1/health || echo "(nginx :80 health failed)"
+            echo "=== live slate via :8083 ==="
+            curl -fsS "http://127.0.0.1:8083/api/live" | head -c 400 || true
+            echo
+            echo "=== recent container logs ==="
+            docker logs --tail 60 eeehoc-dashboard 2>&1 || true
