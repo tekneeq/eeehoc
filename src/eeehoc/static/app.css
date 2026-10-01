@@ -721,6 +721,137 @@ main {
   }
 }
 
+.p1-board {
+  margin: 0 0 1.35rem;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, rgba(20, 28, 34, 0.92), rgba(10, 14, 18, 0.88));
+}
+
+.p1-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.p1-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.p1-head p,
+.p1-loading,
+.p1-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.p1-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.p1-legend b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.p1-swatch {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.35rem;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.p1-swatch.season {
+  background: var(--accent);
+}
+
+.p1-swatch.recent {
+  background: var(--ice);
+}
+
+.p1-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.p1-cell {
+  min-width: 0;
+  padding: 0.55rem 0.5rem 0.65rem;
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(180, 210, 200, 0.08);
+}
+
+.p1-score {
+  margin: 0 0 0.45rem;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.92rem;
+  letter-spacing: -0.03em;
+}
+
+.p1-metric {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.p1-pct {
+  grid-row: 1 / span 2;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--accent);
+  min-width: 2.4rem;
+}
+
+.p1-metric.recent .p1-pct {
+  color: var(--ice);
+}
+
+.p1-count {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.p1-bar {
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.p1-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.p1-metric.recent .p1-bar span {
+  background: var(--ice);
+}
+
 @media (max-width: 720px) {
   .live-toolbar {
     flex-direction: column;
@@ -731,5 +862,8 @@ main {
   }
   .day-label {
     min-width: 0;
+  }
+  .p1-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
