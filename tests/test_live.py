@@ -334,7 +334,7 @@ def _fake_fetch(calls: list[str]):
 
 
 def test_elapsed_minute_and_goal_clock():
-    from eeehoc.live import elapsed_minute, period_name, remaining_from_elapsed
+    from eeehoc.live import elapsed_minute, period_name, play_game_seconds, remaining_from_elapsed, scoreboard_game_seconds
 
     assert elapsed_minute(1, 1200) == 1
     assert elapsed_minute(1, 0) == 20
@@ -349,6 +349,12 @@ def test_elapsed_minute_and_goal_clock():
     assert remaining_from_elapsed("3:12", 4, 300) == "1:48"
     assert remaining_from_elapsed("0:40", 5) == "SO"
     assert remaining_from_elapsed("8:00", 5, playoffs=True) == "12:00"
+    assert play_game_seconds("13:31", 1) == 13 * 60 + 31
+    assert play_game_seconds("8:00", 2) == 20 * 60 + 8 * 60
+    assert play_game_seconds("1:12", 4, ot_seconds=300) == 60 * 60 + 72
+    assert play_game_seconds("0:40", 5) is None
+    assert scoreboard_game_seconds(2, 720) == 28 * 60
+    assert scoreboard_game_seconds(4, 0, ot_seconds=300) == 65 * 60
 
 
 def test_period_labels_final_ot_and_shootout():
@@ -385,6 +391,7 @@ def test_normalize_scoreboard_orders_live_first():
     assert live["short_name"] == "PHI @ BOS"
     assert live["period_label"] == "2nd 12:00"
     assert live["minute"] == 28
+    assert live["elapsed_sec"] == 28 * 60
     assert live["broadcast"] == "TNT · truTV"
     assert live["notes"] == ["Preseason"]
     assert live["home"]["abbr"] == "BOS"
@@ -435,6 +442,8 @@ def test_apply_summary_goals_goalies_and_power_play():
 
     goal = game["goals"][0]
     assert goal["when"] == "1st 6:29"
+    assert goal["at"] == 13 * 60 + 31
+    assert goal["score"] == "0-1"
     assert goal["side"] == "home"
     assert goal["scorer"] == "M. Eyssimont (1)"
     assert goal["assists"] == ["F. Brunet", "T. Jeannot"]

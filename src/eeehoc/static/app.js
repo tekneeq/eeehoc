@@ -248,19 +248,81 @@
       .join("")}</div>`;
   }
 
+  function periodHead(index, playoffs) {
+    if (index < 3) return String(index + 1);
+    if (!playoffs) return index === 3 ? "OT" : "SO";
+    const n = index - 2;
+    return n === 1 ? "OT" : `${n}OT`;
+  }
+
   function linescore(game) {
     const a = game.away.linescores || [];
     const h = game.home.linescores || [];
     const n = Math.max(a.length, h.length);
-    if (!n) return "";
-    const heads = Array.from({ length: n }, (_, i) => (i < 3 ? String(i + 1) : i === 3 ? "OT" : "SO"));
+    if (!n || game.state === "pre") return "";
+    const heads = Array.from({ length: n }, (_, i) => periodHead(i, game.playoffs));
     const cells = (arr) => heads.map((_, i) => `<span>${arr[i] ?? "–"}</span>`).join("");
     return `
-      <div class="linescore" style="grid-template-columns: 2.6rem repeat(${n}, 1.5rem) 1.6rem">
+      <div class="linescore" style="grid-template-columns: 2.6rem repeat(${n}, minmax(0, 1fr)) 1.6rem">
         <span class="lsn"></span>${heads.map((x) => `<span class="lsh">${x}</span>`).join("")}<span class="lsh">T</span>
         <span class="lsn">${esc(game.away.abbr)}</span>${cells(a)}<span class="lst">${game.away.score}</span>
         <span class="lsn">${esc(game.home.abbr)}</span>${cells(h)}<span class="lst">${game.home.score}</span>
       </div>`;
+  }
+
+  function goalTimeline(game) {
+    if (game.state === "pre") return "";
+    const goals = (game.goals || []).filter((g) => typeof g.at === "number");
+    const reg = 60 * 60;
+    const otLen = game.ot_seconds || 300;
+    const maxPeriod = Math.max(game.period || 0, 3, ...goals.map((g) => g.period || 0));
+    let maxSec = reg;
+    if (game.playoffs && maxPeriod > 3) maxSec = maxPeriod * 20 * 60;
+    else if (maxPeriod > 3) maxSec = reg + otLen;
+    const now = game.state === "in" ? Math.max(0, Math.min(maxSec, game.elapsed_sec || 0)) : maxSec;
+    const W = 320;
+    const H = 58;
+    const padL = 26;
+    const padR = 8;
+    const axisY = 28;
+    const xAt = (sec) => padL + (Math.max(0, Math.min(maxSec, sec)) / maxSec) * (W - padL - padR);
+    const ticks = [20, 40, 60].filter((m) => m * 60 <= maxSec);
+    if (maxSec > reg + 30) ticks.push(Math.round(maxSec / 60));
+    const seen = new Map();
+    const marks = goals
+      .map((g) => {
+        const bucket = `${g.side}:${Math.round(g.at / 25)}`;
+        const n = seen.get(bucket) || 0;
+        seen.set(bucket, n + 1);
+        const home = g.side !== "away";
+        const x = xAt(g.at) + (home ? 1 : -1) * n * 3.4;
+        const color = teamColor(home ? game.home : game.away);
+        const y1 = home ? axisY - 16 : axisY + 2;
+        const y2 = home ? axisY - 2 : axisY + 16;
+        const cy = home ? axisY - 11 : axisY + 11;
+        const title = [g.when, g.score, g.scorer, g.tag].filter(Boolean).join(" ");
+        return `<g class="tl-goal"><title>${esc(title)}</title><line x1="${x.toFixed(1)}" y1="${y1}" x2="${x.toFixed(1)}" y2="${y2}" stroke="${color}"/><circle cx="${x.toFixed(1)}" cy="${cy}" r="3.3" fill="${color}"/></g>`;
+      })
+      .join("");
+    const tickMarks = ticks
+      .map((m) => {
+        const tx = xAt(m * 60).toFixed(1);
+        const label = m > 60 ? (game.playoffs ? periodHead(Math.round(m / 20) - 1, true) : "OT") : String(m);
+        return `<line x1="${tx}" y1="${axisY - 4}" x2="${tx}" y2="${axisY + 4}" class="tl-ht"/><text x="${tx}" y="${H - 2}" class="tl-label" text-anchor="middle">${esc(label)}</text>`;
+      })
+      .join("");
+    const nowX = xAt(now).toFixed(1);
+    return `
+      <svg class="goal-tl" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Goal times, home above the line and away below. ${esc(game.home.abbr)} ${esc(game.home.score)}, ${esc(game.away.abbr)} ${esc(game.away.score)}">
+        <text x="1" y="12" class="tl-side" fill="${teamColor(game.home)}">${esc(game.home.abbr)}</text>
+        <text x="1" y="44" class="tl-side" fill="${teamColor(game.away)}">${esc(game.away.abbr)}</text>
+        <line x1="${padL}" y1="${axisY}" x2="${W - padR}" y2="${axisY}" class="tl-axis"/>
+        <line x1="${padL}" y1="${axisY}" x2="${nowX}" y2="${axisY}" class="tl-progress"/>
+        ${game.state === "in" ? `<line x1="${nowX}" y1="8" x2="${nowX}" y2="${H - 14}" class="tl-now"/>` : ""}
+        ${tickMarks}
+        <text x="${padL}" y="${H - 2}" class="tl-label">0</text>
+        ${marks}
+      </svg>`;
   }
 
   function pairRow(label, awayHtml, homeHtml) {
@@ -389,13 +451,14 @@
                </div>`
             : ""
         }
+        ${goalTimeline(game)}
+        ${linescore(game)}
         ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${goalLog(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
         ${expanded && leaders ? `<div class="goalies">${leaders}</div>` : ""}
         ${expanded ? starLines(game) : ""}
-        ${expanded ? linescore(game) : ""}
         ${preBits.length ? `<div class="pre-note">${esc(preBits.join(" · "))}</div>` : ""}
         ${
           game.state === "pre"

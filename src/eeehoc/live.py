@@ -96,6 +96,17 @@ def elapsed_minute(period: int, clock_seconds: float | None) -> int:
     return max(1, min(REGULATION_MINUTES, math.ceil(elapsed - 1e-9)))
 
 
+def _clock_elapsed_seconds(clock: str) -> int | None:
+    raw = (clock or "").strip()
+    if ":" not in raw:
+        return None
+    mins_s, secs_s = raw.split(":", 1)
+    try:
+        return int(mins_s) * 60 + int(float(secs_s))
+    except ValueError:
+        return None
+
+
 def remaining_from_elapsed(clock: str, period: int, ot_seconds: int = 300, *, playoffs: bool = False) -> str:
     """ESPN play-by-play clock counts up. Goals read better as time remaining.
 
@@ -105,14 +116,9 @@ def remaining_from_elapsed(clock: str, period: int, ot_seconds: int = 300, *, pl
     """
     if period >= 5 and not playoffs:
         return "SO"
-    raw = (clock or "").strip()
-    if ":" not in raw:
-        return raw
-    mins_s, secs_s = raw.split(":", 1)
-    try:
-        elapsed = int(mins_s) * 60 + int(float(secs_s))
-    except ValueError:
-        return raw
+    elapsed = _clock_elapsed_seconds(clock)
+    if elapsed is None:
+        return (clock or "").strip()
     if period <= REGULATION_PERIODS or playoffs:
         length = PERIOD_SECONDS
     else:
@@ -121,6 +127,36 @@ def remaining_from_elapsed(clock: str, period: int, ot_seconds: int = 300, *, pl
             length = PERIOD_SECONDS
     rem = max(0, length - elapsed)
     return f"{rem // 60}:{rem % 60:02d}"
+
+
+def play_game_seconds(clock: str, period: int, *, playoffs: bool = False, ot_seconds: int = 300) -> int | None:
+    """Elapsed seconds from puck drop. Play-by-play clocks count up inside the period."""
+    if period < 1 or (not playoffs and period >= 5):
+        return None
+    elapsed = _clock_elapsed_seconds(clock)
+    if elapsed is None:
+        return None
+    if period <= REGULATION_PERIODS or playoffs:
+        return (period - 1) * PERIOD_SECONDS + elapsed
+    return REGULATION_PERIODS * PERIOD_SECONDS + elapsed
+
+
+def scoreboard_game_seconds(
+    period: int, clock_seconds: float | None, *, playoffs: bool = False, ot_seconds: int = 300
+) -> int | None:
+    """Elapsed seconds from the scoreboard clock, which counts down."""
+    if period < 1:
+        return None
+    if not playoffs and period >= 5:
+        return REGULATION_PERIODS * PERIOD_SECONDS + max(60, int(ot_seconds))
+    remaining = 0 if clock_seconds is None else max(0, int(clock_seconds))
+    if period <= REGULATION_PERIODS or playoffs:
+        length = PERIOD_SECONDS
+        base = (period - 1) * PERIOD_SECONDS
+    else:
+        length = max(60, int(ot_seconds))
+        base = REGULATION_PERIODS * PERIOD_SECONDS
+    return base + max(0, length - remaining)
 
 
 def _ot_label(period: int, clock: str, *, playoffs: bool) -> str:
@@ -392,6 +428,8 @@ def _goals(
     plays: list[dict[str, Any]], home_id: str, away_id: str, ot_seconds: int, *, playoffs: bool = False
 ) -> list[dict[str, Any]]:
     goals: list[dict[str, Any]] = []
+    away_score = 0
+    home_score = 0
     for play in plays:
         if not play.get("scoringPlay"):
             continue
@@ -412,11 +450,18 @@ def _goals(
         if ytd is not None and str(ytd) != "":
             name = f"{name} ({_int(ytd)})".strip()
         when = _goal_when(period, elapsed, ot_seconds, playoffs)
+        side = _team_side((play.get("team") or {}).get("id"), home_id, away_id) or ""
+        if side == "away":
+            away_score += 1
+        elif side == "home":
+            home_score += 1
         goals.append(
             {
                 "period": period,
                 "when": when,
-                "side": _team_side((play.get("team") or {}).get("id"), home_id, away_id) or "",
+                "at": play_game_seconds(elapsed, period, playoffs=playoffs, ot_seconds=ot_seconds),
+                "score": f"{away_score}-{home_score}",
+                "side": side,
                 "scorer": name,
                 "assists": assists,
                 "tag": _goal_tag(play),
@@ -538,8 +583,12 @@ def normalize_event(event: dict[str, Any], *, ot_seconds: int = 300, playoffs: b
     }
     if state in ("in", "post"):
         game["minute"] = REGULATION_MINUTES if state == "post" else elapsed_minute(period, clock_seconds)
+        game["elapsed_sec"] = scoreboard_game_seconds(
+            period, clock_seconds, playoffs=playoffs, ot_seconds=ot_seconds
+        )
     else:
         game["minute"] = None
+        game["elapsed_sec"] = None
     raw_situation = comp.get("situation") if state == "in" else None
     if isinstance(raw_situation, dict):
         game["situation"] = {
