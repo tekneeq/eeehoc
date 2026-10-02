@@ -533,6 +533,7 @@ def normalize_event(event: dict[str, Any], *, ot_seconds: int = 300, playoffs: b
         "away": away,
         "situation": None,
         "goals": [],
+        "period_shots": [],
         "stars": _stars(status, home["id"], away["id"]),
     }
     if state in ("in", "post"):
@@ -584,6 +585,79 @@ def normalize_scoreboard(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _shot_period_label(period: int, *, playoffs: bool) -> str:
+    if period <= REGULATION_PERIODS:
+        return str(period)
+    extra = period - REGULATION_PERIODS
+    if not playoffs:
+        return "OT"
+    return "OT" if extra == 1 else f"{extra}OT"
+
+
+def _periods_played(game: dict[str, Any]) -> int:
+    lines = max(
+        len((game.get("home") or {}).get("linescores") or []),
+        len((game.get("away") or {}).get("linescores") or []),
+    )
+    period = _int(game.get("period")) if game.get("state") in ("in", "post") else 0
+    n = max(lines, period)
+    if not game.get("playoffs"):
+        # A shootout is a 5th linescore, not a shot period.
+        n = min(n, REGULATION_PERIODS + 1)
+    return n
+
+
+def period_shot_lines(
+    plays: list[dict[str, Any]],
+    home_id: str,
+    away_id: str,
+    *,
+    periods: int,
+    playoffs: bool = False,
+) -> list[dict[str, Any]]:
+    """Per-period shot attempts and shots on goal.
+
+    ESPN's team ``shotsTotal`` is shots on goal (saves + goals). A ``Blocked``
+    play is credited to the blocker, so that attempt belongs to the other team.
+    Shot attempts are shots on goal plus missed and blocked shots. Shootout
+    attempts are left out.
+    """
+    sog: dict[str, dict[int, int]] = {"home": {}, "away": {}}
+    missed: dict[str, dict[int, int]] = {"home": {}, "away": {}}
+    blocked: dict[str, dict[int, int]] = {"home": {}, "away": {}}
+    buckets = {"Shot": sog, "Goal": sog, "Missed": missed, "Blocked": blocked}
+    for play in plays or []:
+        kind = str((play.get("type") or {}).get("text") or "")
+        bucket = buckets.get(kind)
+        if bucket is None:
+            continue
+        period = _int((play.get("period") or {}).get("number") or play.get("period"))
+        if period < 1 or (not playoffs and period >= 5):
+            continue
+        side = _team_side((play.get("team") or {}).get("id"), home_id, away_id)
+        if side is None:
+            continue
+        bucket[side][period] = bucket[side].get(period, 0) + 1
+
+    played = {p for side in (sog, missed, blocked) for counts in side.values() for p in counts}
+    n = max(periods, max(played, default=0))
+    if not playoffs:
+        n = min(n, REGULATION_PERIODS + 1)
+    if n < 1:
+        return []
+    other = {"home": "away", "away": "home"}
+    rows: list[dict[str, Any]] = []
+    for period in range(1, n + 1):
+        row: dict[str, Any] = {"period": period, "label": _shot_period_label(period, playoffs=playoffs)}
+        for side in ("away", "home"):
+            on_goal = sog[side].get(period, 0)
+            attempts = on_goal + missed[side].get(period, 0) + blocked[other[side]].get(period, 0)
+            row[f"{side}_sog"] = on_goal
+            row[f"{side}_shots"] = attempts
+        rows.append(row)
+    return rows
+
+
 def _compose_special_teams(stats: dict[str, Any]) -> None:
     if "pp_goals" in stats or "pp_opps" in stats:
         stats["power_play"] = f"{stats.get('pp_goals') or '0'}/{stats.get('pp_opps') or '0'}"
@@ -630,6 +704,18 @@ def apply_summary(game: dict[str, Any], summary: dict[str, Any]) -> None:
         game["situation"] = situation_from_summary(summary, home_id, away_id)
     else:
         game["situation"] = None
+
+    plays = summary.get("plays") or []
+    if game["state"] in ("in", "post") and plays:
+        game["period_shots"] = period_shot_lines(
+            plays,
+            home_id,
+            away_id,
+            periods=_periods_played(game),
+            playoffs=bool(game.get("playoffs")),
+        )
+    else:
+        game["period_shots"] = []
 
     if not game["stars"]:
         header_comp = ((summary.get("header") or {}).get("competitions") or [{}])[0]

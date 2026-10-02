@@ -662,6 +662,37 @@ main {
   padding-top: 0.15rem;
 }
 
+.period-shots {
+  display: grid;
+  gap: 0.12rem 0.3rem;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-align: center;
+  margin-top: 0.45rem;
+}
+
+.period-shots .lsn,
+.period-shots .lsh {
+  color: var(--muted);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+}
+
+.period-shots .lsn {
+  text-align: left;
+}
+
+.period-shots .sp b {
+  font-weight: 600;
+}
+
+.period-shots .sp i {
+  font-style: normal;
+  color: var(--muted);
+  padding: 0 0.05rem;
+}
+
 .linescore {
   display: grid;
   gap: 0.1rem 0.25rem;

@@ -453,6 +453,46 @@ def test_apply_summary_goals_goalies_and_power_play():
     assert final["situation"] is None
     assert final["goals"] == []
 
+    # Goal in the 1st and a saved shot in the 2nd, both by the home team.
+    # The live game is in the 2nd, so both periods are listed.
+    assert [(row["label"], row["away_sog"], row["home_sog"], row["away_shots"], row["home_shots"]) for row in game["period_shots"]] == [
+        ("1", 0, 1, 0, 1),
+        ("2", 0, 1, 0, 1),
+    ]
+
+
+def test_period_shots_count_missed_and_blocked_for_the_shooter():
+    from eeehoc.live import period_shot_lines
+
+    plays = [
+        {"type": {"text": "Goal"}, "period": {"number": 1}, "team": {"id": "10"}},
+        {"type": {"text": "Shot"}, "period": {"number": 1}, "team": {"id": "10"}},
+        {"type": {"text": "Missed"}, "period": {"number": 1}, "team": {"id": "10"}},
+        # ESPN credits the blocker. The attempt belongs to the other team.
+        {"type": {"text": "Blocked"}, "period": {"number": 1}, "team": {"id": "8"}},
+        {"type": {"text": "Shot"}, "period": {"number": 2}, "team": {"id": "8"}},
+        {"type": {"text": "Shot"}, "period": {"number": 5}, "team": {"id": "10"}},
+    ]
+    rows = period_shot_lines(plays, "8", "10", periods=3, playoffs=False)
+    by_label = {row["label"]: row for row in rows}
+    assert list(by_label) == ["1", "2", "3"]
+    assert rows[0]["away_sog"] == 2
+    assert rows[0]["away_shots"] == 4  # 2 on goal + missed + the home block
+    assert rows[0]["home_sog"] == 0
+    assert rows[0]["home_shots"] == 0
+    assert rows[1] == {"period": 2, "label": "2", "away_sog": 0, "home_sog": 1, "away_shots": 0, "home_shots": 1}
+    assert rows[2]["away_shots"] == 0 and rows[2]["home_shots"] == 0
+
+    playoff = period_shot_lines(
+        [{"type": {"text": "Goal"}, "period": {"number": 5}, "team": {"id": "10"}}],
+        "8",
+        "10",
+        periods=5,
+        playoffs=True,
+    )
+    assert [row["label"] for row in playoff] == ["1", "2", "3", "OT", "2OT"]
+    assert playoff[-1]["away_sog"] == 1
+
 
 def test_live_feed_caches_and_falls_back_to_stale(monkeypatch):
     from eeehoc import live as live_mod
