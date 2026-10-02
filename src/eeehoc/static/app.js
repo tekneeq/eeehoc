@@ -302,13 +302,35 @@
       .join("")}</div>`;
   }
 
+  function shotPair(game, away, home) {
+    return `<span class="sp"><b style="color:${teamColor(game.away)}">${away}</b><i>–</i><b style="color:${teamColor(game.home)}">${home}</b></span>`;
+  }
+
+  function periodShots(game) {
+    const rows = game.period_shots || [];
+    if (!rows.length || game.state === "pre") return "";
+    const awayShots = rows.reduce((sum, row) => sum + (row.away_shots || 0), 0);
+    const homeShots = rows.reduce((sum, row) => sum + (row.home_shots || 0), 0);
+    const awaySog = rows.reduce((sum, row) => sum + (row.away_sog || 0), 0);
+    const homeSog = rows.reduce((sum, row) => sum + (row.home_sog || 0), 0);
+    const head = rows.map((row) => `<span class="lsh">${esc(row.label)}</span>`).join("");
+    const line = (keyA, keyH, totalA, totalH) =>
+      rows.map((row) => shotPair(game, row[keyA] || 0, row[keyH] || 0)).join("") + shotPair(game, totalA, totalH);
+    return `
+      <div class="period-shots" style="grid-template-columns: 3.4rem repeat(${rows.length + 1}, minmax(0, 1fr))" aria-label="Shots and shots on goal by period, ${esc(game.away.abbr)} then ${esc(game.home.abbr)}">
+        <span></span>${head}<span class="lsh">T</span>
+        <span class="lsn" title="Shot attempts: on goal, missed, and blocked">Shots</span>${line("away_shots", "home_shots", awayShots, homeShots)}
+        <span class="lsn" title="Shots on goal">On goal</span>${line("away_sog", "home_sog", awaySog, homeSog)}
+      </div>`;
+  }
+
   function chicletHtml(game) {
     const expanded = state.expanded.has(game.id);
     const s = game.situation;
     const lp = s?.last_play;
     const pp = s?.power_play ? " power-play" : "";
     const showShots = game.state !== "pre";
-    const core = showShots ? statRow("Shots", "shots", game) : "";
+    const core = showShots ? statRow("On goal", "shots", game) : "";
     const more = expanded
       ? [
           statRow("Hits", "hits", game),
@@ -367,6 +389,7 @@
                </div>`
             : ""
         }
+        ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${goalLog(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
