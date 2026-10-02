@@ -662,6 +662,59 @@ main {
   padding-top: 0.15rem;
 }
 
+.goal-tl {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 0.35rem;
+  overflow: visible;
+}
+
+.tl-axis {
+  stroke: rgba(180, 210, 200, 0.35);
+  stroke-width: 1.5;
+}
+
+.tl-progress {
+  stroke: rgba(125, 255, 179, 0.55);
+  stroke-width: 2.5;
+}
+
+.tl-ht {
+  stroke: rgba(180, 210, 200, 0.35);
+  stroke-width: 1;
+}
+
+.tl-now {
+  stroke: var(--danger);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.tl-label,
+.tl-side {
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.tl-label {
+  fill: rgba(195, 220, 210, 0.8);
+}
+
+.tl-side {
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.tl-goal line {
+  stroke-width: 2;
+}
+
+.tl-goal circle {
+  stroke: #04140c;
+  stroke-width: 0.7;
+}
+
 .period-shots {
   display: grid;
   gap: 0.12rem 0.3rem;
