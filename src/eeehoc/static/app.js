@@ -1,6 +1,7 @@
 (() => {
   const state = {
     board: null,
+    periods: null,
     form: {},
     formLoading: new Set(),
     filter: "all",
@@ -27,9 +28,91 @@
 
   function scheduleLive() {
     stopLive();
+    let ticks = 0;
     state.timer = setInterval(() => {
-      if (document.visibilityState === "visible") loadLive();
+      if (document.visibilityState !== "visible") return;
+      loadLive();
+      ticks += 1;
+      if (ticks % 3 === 0) loadPeriods();
     }, LIVE_REFRESH_MS);
+  }
+
+  function fmtPct(pct, games) {
+    if (!games) return "–";
+    return `${pct}%`;
+  }
+
+  function fmtMix(mix) {
+    if (!mix) return "";
+    const bits = [];
+    if (mix.preseason) bits.push(`${mix.preseason} preseason`);
+    if (mix.regular) bits.push(`${mix.regular} regular`);
+    if (mix.playoffs) bits.push(`${mix.playoffs} playoff`);
+    return bits.join(" · ");
+  }
+
+  function metricHtml(row, bucket, kind) {
+    const games = row?.games || 0;
+    const pct = bucket?.pct || 0;
+    const count = bucket?.count || 0;
+    const width = games ? Math.max(pct, count ? 2 : 0) : 0;
+    return `
+      <div class="p1-metric ${kind}">
+        <span class="p1-pct">${fmtPct(pct, games)}</span>
+        <span class="p1-count">${games ? count : "–"}</span>
+        <span class="p1-bar"><span style="width:${width}%"></span></span>
+      </div>`;
+  }
+
+  function renderPeriods() {
+    const grid = $("#p1Grid");
+    const legend = $("#p1Legend");
+    const note = $("#p1Note");
+    const board = state.periods;
+    if (!board || board.error && !board.season) {
+      grid.innerHTML = `<p class="p1-error">${esc(board?.error || "Distribution unavailable")}</p>`;
+      legend.innerHTML = "";
+      return;
+    }
+    const season = board.season || {};
+    const recent = board.recent || {};
+    const buckets = season.buckets || recent.buckets || [];
+    if (!buckets.length) {
+      grid.innerHTML = `<p class="p1-loading">No completed 1st periods yet.</p>`;
+      legend.innerHTML = "";
+      return;
+    }
+    const seasonMix = season.games ? `${season.games} games` : "no games yet";
+    const recentMix = recent.games ? `${recent.games} games` : "no games yet";
+    legend.innerHTML = `
+      <span><i class="p1-swatch season"></i><b>Season</b> ${esc(season.detail || "")} · ${esc(seasonMix)}</span>
+      <span><i class="p1-swatch recent"></i><b>Past 30 days</b> ${esc(fmtMix(recent.mix) || recent.detail || "")} · ${esc(recentMix)}</span>
+    `;
+    if (board.stale) note.textContent = "How the first period ends. Showing the last saved sample.";
+    grid.innerHTML = buckets
+      .map((bucket, index) => {
+        const recentBucket = (recent.buckets || [])[index] || bucket;
+        return `
+          <article class="p1-cell">
+            <h3 class="p1-score">${esc(bucket.name || bucket.label)}</h3>
+            ${metricHtml(season, bucket, "season")}
+            ${metricHtml(recent, recentBucket, "recent")}
+          </article>`;
+      })
+      .join("");
+  }
+
+  async function loadPeriods() {
+    try {
+      const res = await fetch("/api/periods");
+      const board = await res.json();
+      if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      state.periods = board;
+    } catch (err) {
+      state.periods = state.periods || { error: err.message || String(err) };
+      if (!state.periods.season) state.periods.error = err.message || String(err);
+    }
+    renderPeriods();
   }
 
   async function loadLive(force = false) {
@@ -653,5 +736,6 @@
   $("#liveGrid").addEventListener("click", onGridClick);
 
   loadLive();
+  loadPeriods();
   scheduleLive();
 })();
