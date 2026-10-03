@@ -23,6 +23,7 @@
         <button class="tab active" data-tab="live" role="tab" aria-selected="true">
           Live <span class="tab-badge" id="liveBadge" hidden></span>
         </button>
+        <button class="tab" data-tab="winprob" role="tab" aria-selected="false">WinProb</button>
       </nav>
     </header>
 
@@ -63,6 +64,50 @@
           </div>
         </div>
         <div id="liveGrid" class="chiclet-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="panel-winprob" class="panel" role="tabpanel" hidden>
+        <div class="panel-head">
+          <h1>WinProb</h1>
+          <p class="lede">
+            Pre-game win probability for every game, from an Elo rating that moves with the margin of victory.
+            Each game is graded with the ratings <b>as they stood before puck drop</b>, so the record is honest:
+            the big number is how often the model's favourite won. The buckets show how 50-55% favourites,
+            55-60% favourites and so on actually fared, and the team table shows each club's record when
+            its own chance was in a given band.
+          </p>
+        </div>
+        <div class="toolbar live-toolbar" id="wpToolbar">
+          <div class="chip-group" id="wpSeasons" role="group" aria-label="Season"></div>
+          <div class="live-status">
+            <span id="wpMeta" class="live-meta">Loading model…</span>
+            <button type="button" class="refresh" id="wpRefresh" title="Re-download the schedule and recompute">Refresh</button>
+          </div>
+        </div>
+        <div id="wpRecord" class="wp-record"></div>
+        <div id="wpBuckets" class="card wp-buckets"></div>
+        <div class="wp-day-head">
+          <h2 id="wpDayTitle">Games</h2>
+          <div class="day-nav" role="group" aria-label="Game day">
+            <button type="button" class="chip" id="wpPrev" title="Previous game day">‹</button>
+            <button type="button" class="chip" id="wpToday">Today</button>
+            <span id="wpDayLabel" class="day-label">—</span>
+            <button type="button" class="chip" id="wpNext" title="Next game day">›</button>
+          </div>
+        </div>
+        <div id="wpGames" class="chiclet-grid"></div>
+        <details class="card wp-more" id="wpTeams" open>
+          <summary>Team records by their own pre-game chance</summary>
+          <p class="lede small">
+            Favoured / underdog are the club's overall records in each role. Each band is the club's record in games
+            where <b>its</b> win probability fell in that range — the club's own chance, not the favourite's.
+          </p>
+          <div id="wpTeamBuckets" class="tb-wrap"></div>
+        </details>
+        <details class="card wp-more" id="wpRatings">
+          <summary>Power ratings</summary>
+          <div id="wpRatingList"></div>
+        </details>
       </section>
     </main>
 

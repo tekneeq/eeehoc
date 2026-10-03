@@ -13,9 +13,11 @@ from urllib.parse import parse_qs, urlparse
 from eeehoc.form import FormFeed
 from eeehoc.live import DATE_RE, LiveFeed
 from eeehoc.periods import PeriodFeed
+from eeehoc.winprob import WinProbService, day_view
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEAM_ID_RE = re.compile(r"^\d{1,6}$")
+DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class DashboardState:
@@ -24,10 +26,12 @@ class DashboardState:
         live: LiveFeed | None = None,
         periods: PeriodFeed | None = None,
         form: FormFeed | None = None,
+        winprob: WinProbService | None = None,
     ) -> None:
         self.live = live or LiveFeed()
         self.periods = periods or PeriodFeed()
         self.form = form or FormFeed()
+        self.winprob = winprob or WinProbService()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -108,6 +112,17 @@ def make_handler(state: DashboardState):
                 except Exception as exc:  # noqa: BLE001
                     return self._send(502, _json_bytes({"error": str(exc)}), "application/json")
                 return self._send(200, _json_bytes(form), "application/json")
+
+            if path == "/api/winprob":
+                season_q = (qs.get("season") or [""])[0].strip()
+                season = int(season_q) if season_q.isdigit() else None
+                day = (qs.get("day") or [""])[0].strip()
+                force = (qs.get("force") or ["0"])[0] in ("1", "true")
+                try:
+                    board = state.winprob.get(season=season, force=force)
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc), "games": []}), "application/json")
+                return self._send(200, _json_bytes(day_view(board, day if DAY_RE.fullmatch(day) else None)), "application/json")
 
             return self._send(404, b"not found", "text/plain; charset=utf-8")
 
