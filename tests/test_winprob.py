@@ -173,6 +173,18 @@ def test_buckets_and_team_records():
     assert "games" in view and len(day_view(board, None)["games"]) == 1
 
 
+def test_finished_season_recent_window_ends_on_its_last_game_day():
+    events = [
+        _event("a", "2026-04-10T23:00Z", "1", "2", away_score=1, home_score=2, state="post", year=2026),
+        _event("b", "2026-04-16T23:00Z", "3", "4", away_score=0, home_score=1, state="post", year=2026),
+    ]
+    model = run_model(_games(events), {2026})
+    board = build_board(model, 2026, today=date(2026, 10, 3))
+    assert board["record"]["recent"]["through"] == "2026-04-16"
+    assert board["record"]["recent"]["record"] == "2-0"
+    assert [d["day"] for d in board["record"]["daily"]] == ["2026-04-10", "2026-04-16"]
+
+
 def _fetch_factory(calls):
     def fetch(url):
         calls.append(url)

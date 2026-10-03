@@ -306,16 +306,20 @@ def _finish(block: dict[str, Any]) -> dict[str, Any]:
 def record_summary(games: list[dict[str, Any]], *, today: date) -> dict[str, Any]:
     total, recent = _block(), _block()
     by_day: dict[str, dict[str, Any]] = {}
-    cutoff = (today - timedelta(days=RECENT_DAYS - 1)).isoformat()
+    # A finished season's "recent" window ends on its last game day, not today.
+    anchor = today.isoformat()
+    if games and not any(g["result"] is None for g in games):
+        anchor = min(anchor, max(g["day"] for g in games))
+    cutoff = (date.fromisoformat(anchor) - timedelta(days=RECENT_DAYS - 1)).isoformat()
     for g in games:
         _tally(total, g)
-        if cutoff <= g["day"] <= today.isoformat():
+        if cutoff <= g["day"] <= anchor:
             _tally(recent, g)
         _tally(by_day.setdefault(g["day"], _block()), g)
-    days = sorted(d for d in by_day if d <= today.isoformat())[-DAILY_POINTS:]
+    days = sorted(d for d in by_day if d <= anchor)[-DAILY_POINTS:]
     return {
         "total": _finish(total),
-        "recent": {"days": RECENT_DAYS, **_finish(recent)},
+        "recent": {"days": RECENT_DAYS, "through": anchor, **_finish(recent)},
         "daily": [{"day": d, **_finish(by_day[d])} for d in days],
     }
 

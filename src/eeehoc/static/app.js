@@ -834,7 +834,7 @@
           <span><b>${t.decided}</b> decided</span>
           <span><b>${t.pending}</b> still to play</span>
           <span>Brier <b>${t.brier ?? "–"}</b></span>
-          <span title="Last ${recent.days} days">Last ${recent.days}d <b>${esc(recent.record)}</b> (${pct(recent.pct)})</span>
+          <span title="${recent.days} days through ${esc(fmtDay(recent.through))}">Last ${recent.days}d <b>${esc(recent.record)}</b> (${pct(recent.pct)})</span>
         </div>
       </div>
       <div class="card wp-weekly">

@@ -1269,7 +1269,7 @@ main {
 
 .bucket-row {
   display: grid;
-  grid-template-columns: 4rem 1fr 7rem 9rem 10rem;
+  grid-template-columns: 3.6rem 1fr 7rem 9.5rem 12rem;
   grid-template-areas: "label bar rec exp split";
   gap: 0.6rem;
   align-items: center;
