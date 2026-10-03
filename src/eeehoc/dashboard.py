@@ -10,13 +10,15 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from eeehoc.live import DATE_RE, LiveFeed
+from eeehoc.periods import PeriodFeed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class DashboardState:
-    def __init__(self, live: LiveFeed | None = None) -> None:
+    def __init__(self, live: LiveFeed | None = None, periods: PeriodFeed | None = None) -> None:
         self.live = live or LiveFeed()
+        self.periods = periods or PeriodFeed()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -60,6 +62,13 @@ def make_handler(state: DashboardState):
                 )
             if path == "/health":
                 return self._send(200, b"ok\n", "text/plain; charset=utf-8")
+
+            if path == "/api/periods":
+                try:
+                    board = state.periods.get()
+                except Exception as exc:  # noqa: BLE001 - surface feed outages to the UI
+                    return self._send(502, _json_bytes({"error": str(exc)}), "application/json")
+                return self._send(200, _json_bytes(board), "application/json")
 
             if path == "/api/live":
                 raw_dates = (qs.get("dates") or [""])[0].strip()
