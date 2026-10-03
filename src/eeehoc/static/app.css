@@ -1097,6 +1097,534 @@ main {
   background: var(--ice);
 }
 
+/* --------------------------------------------------------------- WinProb */
+
+.panel[hidden] {
+  display: none;
+}
+
+.card {
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, rgba(20, 28, 34, 0.92), rgba(10, 14, 18, 0.88));
+}
+
+.card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.card h3 small {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: 0.4rem;
+}
+
+.lede.small {
+  font-size: 0.78rem;
+  margin-bottom: 0.6rem;
+}
+
+.wp-record {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2.2fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.wp-big {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.wp-big-rec {
+  font-family: var(--mono);
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.wp-big-pct {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  color: var(--accent);
+}
+
+.mini-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.mini-kpis b {
+  color: var(--text);
+  font-family: var(--mono);
+}
+
+.wp-week-strip {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.wk {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  min-width: 4.6rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.55rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.wk small {
+  font-size: 0.58rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.wk b {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.wk span {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.wk.good b {
+  color: var(--accent);
+}
+
+.wk.bad b {
+  color: var(--danger);
+}
+
+.wk.pending {
+  opacity: 0.6;
+}
+
+.wk.active,
+.wk:hover {
+  border-color: rgba(125, 255, 179, 0.4);
+  background: var(--accent-dim);
+  opacity: 1;
+}
+
+.wp-buckets {
+  margin-bottom: 1.25rem;
+}
+
+.bucket-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.bucket-legend .exp {
+  display: inline-block;
+  width: 2px;
+  height: 0.8rem;
+  background: var(--warn);
+}
+
+.bucket-legend .sw {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.5rem;
+  border-radius: 2px;
+}
+
+.bucket-legend .sw.good,
+.bk-bar .act.good {
+  background: var(--accent);
+}
+
+.bucket-legend .sw.bad,
+.bk-bar .act.bad {
+  background: var(--danger);
+}
+
+.bucket-row {
+  display: grid;
+  grid-template-columns: 3.6rem 1fr 7rem 9.5rem 12rem;
+  grid-template-areas: "label bar rec exp split";
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.76rem;
+}
+
+.bucket-row:last-child {
+  border-bottom: 0;
+}
+
+.bk-label {
+  grid-area: label;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.bk-bar {
+  grid-area: bar;
+  position: relative;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bk-bar .act {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  transition: width 400ms ease;
+}
+
+.bk-bar .exp {
+  position: absolute;
+  top: -0.2rem;
+  bottom: -0.2rem;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--warn);
+  z-index: 1;
+}
+
+.bk-bar .tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.bk-rec {
+  grid-area: rec;
+  font-family: var(--mono);
+}
+
+.bk-exp {
+  grid-area: exp;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+
+.bk-split {
+  grid-area: split;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.wp-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.wp-day-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.wp-card.hit {
+  border-color: rgba(125, 255, 179, 0.35);
+}
+
+.wp-card.miss {
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+.wp-card .team-row {
+  grid-template-columns: 1.7rem minmax(0, 1fr) auto 2.4rem;
+}
+
+.wp-card .team-row.fav .tname b {
+  color: var(--accent);
+}
+
+.wp-card .tname {
+  flex-wrap: wrap;
+}
+
+.verdict {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.verdict.hit {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.verdict.miss {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.bucket-tag {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
+}
+
+.wp-pct {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.wp-pct.fav {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wp-bar {
+  display: flex;
+  height: 1.25rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wp-bar .seg {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 0.45rem;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+}
+
+.wp-bar .seg.a {
+  justify-content: flex-start;
+}
+
+.wp-bar .seg.h {
+  justify-content: flex-end;
+}
+
+.wp-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.wp-lines small {
+  display: block;
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wp-margin {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.wp-actual {
+  color: var(--text);
+}
+
+.wp-actual.muted {
+  color: var(--muted);
+}
+
+.wp-more {
+  margin-top: 1rem;
+}
+
+.wp-more summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.wp-more[open] summary {
+  margin-bottom: 0.6rem;
+}
+
+.tb-wrap {
+  overflow-x: auto;
+}
+
+.tb-grid {
+  display: grid;
+  grid-template-columns: 6rem 4.2rem 4.2rem repeat(var(--cols), minmax(3.4rem, 1fr));
+  gap: 0.15rem 0.4rem;
+  min-width: 42rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  align-items: center;
+}
+
+.tb-h {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+}
+
+.tb-h:first-child {
+  text-align: left;
+}
+
+.tb-team {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  padding-left: 0.35rem;
+  border-left: 2px solid var(--team, var(--line));
+}
+
+.tb-team .logo {
+  width: 1.1rem;
+  height: 1.1rem;
+  object-fit: contain;
+}
+
+.tb-c {
+  text-align: center;
+  padding: 0.15rem 0;
+  border-radius: 0.3rem;
+}
+
+.tb-c.good {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.tb-c.bad {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.tb-c.muted,
+.tb-c.empty {
+  color: var(--muted);
+}
+
+.pwrk {
+  display: inline-block;
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 0.28rem;
+}
+
+.rating-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+
+.rating-row {
+  display: grid;
+  grid-template-columns: 2.2rem 1.3rem minmax(0, 1fr) 4.5rem 3.5rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  border-left: 2px solid var(--team, transparent);
+}
+
+.rating-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.rating-row.head {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-left-color: transparent;
+}
+
+.rating-row .logo {
+  width: 1.3rem;
+  height: 1.3rem;
+  object-fit: contain;
+}
+
+.rating-row .rn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rating-row .rn b {
+  margin-right: 0.3rem;
+}
+
+.rating-row .rr,
+.rating-row .re {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rating-row .re {
+  color: var(--accent);
+}
+
 @media (max-width: 720px) {
   .live-toolbar {
     flex-direction: column;
@@ -1110,5 +1638,18 @@ main {
   }
   .p1-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .wp-record {
+    grid-template-columns: 1fr;
+  }
+  .bucket-row {
+    grid-template-columns: 3.4rem 1fr 6rem;
+    grid-template-areas:
+      "label bar rec"
+      "label exp split";
+    row-gap: 0.15rem;
+  }
+  .bk-exp {
+    text-align: left;
   }
 }
