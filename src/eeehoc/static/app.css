@@ -602,6 +602,167 @@ main {
   color: var(--warn);
 }
 
+/* Last five games for each team: result, then goals over shots on goal by period. */
+.last5 {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.f5-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--mono);
+}
+
+.f5-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.f5-key {
+  font-size: 0.58rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.f5-key small {
+  font-size: 0.52rem;
+  opacity: 0.85;
+}
+
+.f5-team {
+  display: grid;
+  grid-template-columns: 3.9rem 2.1rem repeat(3, minmax(0, 1fr));
+  gap: 0.15rem 0.25rem;
+  align-items: stretch;
+  font-family: var(--mono);
+  padding-left: 0.35rem;
+  border-left: 2px solid var(--team, var(--line));
+}
+
+.f5-name {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--team, var(--text));
+  align-self: end;
+}
+
+.f5-h {
+  font-size: 0.56rem;
+  color: var(--muted);
+  text-align: center;
+  align-self: end;
+}
+
+.f5-empty {
+  grid-column: 2 / -1;
+  font-size: 0.62rem;
+  color: var(--muted);
+  align-self: end;
+}
+
+.f5-opp {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: 0.64rem;
+  color: var(--text);
+}
+
+.f5-opp em {
+  font-style: normal;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.f5-pre {
+  font-style: normal;
+  font-size: 0.48rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 0.2rem;
+  padding: 0 0.2rem;
+}
+
+.f5-res,
+.f5-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  padding: 0.12rem 0.1rem;
+  border-radius: 0.28rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  font-variant-numeric: tabular-nums;
+}
+
+.f5-res b {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.f5-res small,
+.f5-cell small {
+  font-size: 0.52rem;
+  color: var(--muted);
+}
+
+.f5-res.w {
+  border-color: rgba(125, 255, 179, 0.4);
+}
+
+.f5-res.w b {
+  color: var(--accent);
+}
+
+.f5-res.l {
+  border-color: rgba(255, 200, 87, 0.42);
+}
+
+.f5-res.l b {
+  color: var(--warn);
+}
+
+.f5-res.t {
+  border-color: rgba(180, 210, 200, 0.3);
+}
+
+.f5-cell b {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.f5-cell.up b {
+  color: var(--accent);
+}
+
+.f5-cell.down b {
+  color: var(--warn);
+}
+
+.f5-cell.none {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: transparent;
+}
+
 .goalies,
 .stars {
   display: flex;

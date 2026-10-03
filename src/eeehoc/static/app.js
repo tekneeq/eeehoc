@@ -1,6 +1,8 @@
 (() => {
   const state = {
     board: null,
+    form: {},
+    formLoading: new Set(),
     filter: "all",
     expanded: new Set(),
     dates: "",
@@ -386,6 +388,97 @@
       </div>`;
   }
 
+  const RESULT_WORD = { W: "win", L: "loss", OTL: "overtime loss", SOL: "shootout loss", T: "tie" };
+
+  function fmtFormDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
+  }
+
+  function formCell(p) {
+    const sog = p.sog_f != null && p.sog_a != null ? `${p.sog_f}–${p.sog_a}` : "–";
+    const cls = p.gf > p.ga ? "up" : p.gf < p.ga ? "down" : "";
+    const title = p.shootout
+      ? `Shootout ${p.gf}–${p.ga}`
+      : `Period ${p.label}: goals ${p.gf}–${p.ga}, shots on goal ${sog}${p.shots_f != null ? `, attempts ${p.shots_f}–${p.shots_a}` : ""}`;
+    return `<span class="f5-cell ${cls}" title="${esc(title)}"><b>${p.gf}–${p.ga}</b><small>${p.shootout ? "SO" : esc(sog)}</small></span>`;
+  }
+
+  function formTeamHtml(team, games, limit) {
+    const color = teamColor(team);
+    if (!games) {
+      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">last ${limit}…</span></div>`;
+    }
+    if (!games.length) {
+      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">no finished games yet</span></div>`;
+    }
+    const maxPeriods = Math.max(...games.map((g) => (g.periods || []).length), 3);
+    const head = Array.from({ length: maxPeriods }, (_, i) => {
+      const label = games.find((g) => g.periods[i])?.periods[i]?.label || String(i + 1);
+      return `<span class="f5-h">${esc(label)}</span>`;
+    }).join("");
+    const rows = games
+      .map((g) => {
+        const res = String(g.result || "");
+        const cls = res === "W" ? "w" : res === "T" ? "t" : "l";
+        const vs = `${g.venue === "home" ? "v" : "@"} ${g.opponent}`;
+        const when = fmtFormDate(g.date);
+        const title = `${when ? `${when} · ` : ""}${vs} · ${RESULT_WORD[res] || res} ${g.gf}–${g.ga}${g.detail && /OT|SO/.test(g.detail) ? ` (${g.detail.replace("Final/", "")})` : ""}${g.preseason ? " · preseason" : ""}`;
+        const cells = Array.from({ length: maxPeriods }, (_, i) => (g.periods[i] ? formCell(g.periods[i]) : `<span class="f5-cell none"></span>`)).join("");
+        return `
+          <span class="f5-opp" title="${esc(title)}"><em>${esc(vs)}</em>${g.preseason ? `<i class="f5-pre">pre</i>` : ""}</span>
+          <span class="f5-res ${cls}" title="${esc(title)}"><b>${esc(res)}</b><small>${g.gf}–${g.ga}</small></span>
+          ${cells}`;
+      })
+      .join("");
+    return `
+      <div class="f5-team" style="--team:${color}; grid-template-columns: 3.9rem 2.1rem repeat(${maxPeriods}, minmax(0, 1fr))">
+        <span class="f5-name">${esc(team.abbr)}</span><span class="f5-h"></span>${head}
+        ${rows}
+      </div>`;
+  }
+
+  function lastFiveHtml(game) {
+    const form = state.form[game.id];
+    const limit = form?.limit || 5;
+    return `
+      <section class="last5" data-form-for="${esc(game.id)}" aria-label="Last ${limit} games for each team">
+        <header class="f5-head">
+          <span class="f5-label">Last ${limit}</span>
+          <span class="f5-key">oldest → newest · goals <small>shots on goal</small></span>
+        </header>
+        ${formTeamHtml(game.away, form?.away, limit)}
+        ${formTeamHtml(game.home, form?.home, limit)}
+      </section>`;
+  }
+
+  async function loadForm(game) {
+    if (!game || state.form[game.id] || state.formLoading.has(game.id)) return;
+    if (!game.home?.id || !game.away?.id) return;
+    state.formLoading.add(game.id);
+    const params = new URLSearchParams({ home: game.home.id, away: game.away.id, game: game.id });
+    if (state.board?.season_type) params.set("season_type", String(state.board.season_type));
+    try {
+      const res = await fetch(`/api/form?${params}`);
+      const form = await res.json();
+      if (!res.ok) throw new Error(form.error || `HTTP ${res.status}`);
+      state.form[game.id] = form;
+    } catch (err) {
+      state.form[game.id] = { home: [], away: [], limit: 5, error: err.message || String(err) };
+    } finally {
+      state.formLoading.delete(game.id);
+    }
+    document.querySelectorAll(`[data-form-for="${CSS.escape(game.id)}"]`).forEach((el) => {
+      el.outerHTML = lastFiveHtml(game);
+    });
+  }
+
+  function loadVisibleForms() {
+    for (const game of state.board?.games || []) loadForm(game);
+  }
+
   function chicletHtml(game) {
     const expanded = state.expanded.has(game.id);
     const s = game.situation;
@@ -456,6 +549,7 @@
         ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${goalLog(game)}
+        ${lastFiveHtml(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
         ${expanded && leaders ? `<div class="goalies">${leaders}</div>` : ""}
         ${expanded ? starLines(game) : ""}
@@ -515,6 +609,7 @@
       return;
     }
     grid.innerHTML = games.map(chicletHtml).join("");
+    loadVisibleForms();
   }
 
   function onGridClick(ev) {

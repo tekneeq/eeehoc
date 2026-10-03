@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from eeehoc.form import FormFeed
 from eeehoc.live import DATE_RE, LiveFeed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+TEAM_ID_RE = re.compile(r"^\d{1,6}$")
 
 
 class DashboardState:
-    def __init__(self, live: LiveFeed | None = None) -> None:
+    def __init__(self, live: LiveFeed | None = None, form: FormFeed | None = None) -> None:
         self.live = live or LiveFeed()
+        self.form = form or FormFeed()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -74,6 +78,22 @@ def make_handler(state: DashboardState):
                 except Exception as exc:  # noqa: BLE001 - surface feed outages to the UI
                     return self._send(502, _json_bytes({"error": str(exc), "games": []}), "application/json")
                 return self._send(200, _json_bytes(board), "application/json")
+
+            if path == "/api/form":
+                home = (qs.get("home") or [""])[0].strip()
+                away = (qs.get("away") or [""])[0].strip()
+                if not TEAM_ID_RE.fullmatch(home) or not TEAM_ID_RE.fullmatch(away):
+                    return self._send(400, _json_bytes({"error": "home and away team ids are required"}), "application/json")
+                exclude = (qs.get("game") or [""])[0].strip()
+                try:
+                    season_type = int((qs.get("season_type") or ["2"])[0])
+                except ValueError:
+                    season_type = 2
+                try:
+                    form = state.form.for_game(home, away, exclude=exclude, season_type=season_type)
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc)}), "application/json")
+                return self._send(200, _json_bytes(form), "application/json")
 
             return self._send(404, b"not found", "text/plain; charset=utf-8")
 
