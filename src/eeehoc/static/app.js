@@ -4,6 +4,7 @@
     periods: null,
     form: {},
     formLoading: new Set(),
+    shots: null,
     tab: "live",
     wp: { board: null, season: null, day: null, loading: false, error: null },
     filter: "all",
@@ -35,7 +36,10 @@
       if (document.visibilityState !== "visible") return;
       loadLive();
       ticks += 1;
-      if (ticks % 3 === 0) loadPeriods();
+      if (ticks % 3 === 0) {
+        loadPeriods();
+        loadShots();
+      }
       if (ticks % 3 === 0 && state.tab === "winprob") loadWinProb();
     }, LIVE_REFRESH_MS);
   }
@@ -476,6 +480,92 @@
 
   const RESULT_WORD = { W: "win", L: "loss", OTL: "overtime loss", SOL: "shootout loss", T: "tie" };
 
+  async function loadShots() {
+    try {
+      const res = await fetch("/api/shots");
+      const board = await res.json();
+      if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      state.shots = board;
+      if (state.board) renderLive();
+    } catch (err) {
+      console.warn("shots per goal unavailable", err);
+    }
+  }
+
+  function spgTotals(games) {
+    const t = { games: 0, gf: 0, ga: 0, sog_f: 0, sog_a: 0 };
+    for (const g of games) {
+      if (g.sog_f === null || g.sog_a === null) continue;
+      t.games += 1;
+      t.gf += g.gf;
+      t.ga += g.ga;
+      t.sog_f += g.sog_f;
+      t.sog_a += g.sog_a;
+    }
+    t.spg_f = t.gf ? Math.round((t.sog_f / t.gf) * 10) / 10 : null;
+    t.spg_a = t.ga ? Math.round((t.sog_a / t.ga) * 10) / 10 : null;
+    return t;
+  }
+
+  // Scoring: fewer shots per goal than the league is good. Allowing: more is good.
+  function spgTone(value, league, kind) {
+    if (value === null || value === undefined || !league) return "";
+    const edge = (value - league) / league;
+    if (Math.abs(edge) < 0.1) return "";
+    const good = kind === "for" ? edge < 0 : edge > 0;
+    return good ? "up" : "down";
+  }
+
+  function spgCell(totals, kind, league) {
+    const value = kind === "for" ? totals.spg_f : totals.spg_a;
+    const shots = kind === "for" ? totals.sog_f : totals.sog_a;
+    const goals = kind === "for" ? totals.gf : totals.ga;
+    if (!totals.games) return `<span class="spg-cell none"><b>–</b><small>no games</small></span>`;
+    const main = value === null ? "∞" : value.toFixed(1);
+    const tip = `${shots} shots on goal, ${goals} goal${goals === 1 ? "" : "s"} over ${totals.games} game${totals.games === 1 ? "" : "s"}`;
+    return `<span class="spg-cell ${spgTone(value, league, kind)}" title="${esc(tip)}"><b>${main}</b><small>${shots}–${goals}</small></span>`;
+  }
+
+  function spgTeamRow(game, side) {
+    const team = game[side];
+    const row = state.shots?.teams?.[team.id];
+    const league = state.shots?.league?.spg;
+    if (!row) {
+      return `<span class="spg-name" style="color:${teamColor(team)}">${esc(team.abbr)}</span><span class="spg-cell none" style="grid-column: span 4"><small>no finished games yet</small></span>`;
+    }
+    const recent = spgTotals((row.recent || []).filter((g) => g.id !== game.id).slice(-(state.shots.recent_games || 5)));
+    return `
+      <span class="spg-name" style="color:${teamColor(team)}">${esc(team.abbr)}</span>
+      ${spgCell(row.season, "for", league)}
+      ${spgCell(recent, "for", league)}
+      ${spgCell(row.season, "against", league)}
+      ${spgCell(recent, "against", league)}`;
+  }
+
+  function shotsPerGoalHtml(game) {
+    const shots = state.shots;
+    if (!shots || !shots.teams) return "";
+    const seasonLabel = shots.season_kind === "preseason" ? "Preseason" : "Season";
+    const league = shots.league?.spg ? `League ${shots.league.spg.toFixed(1)}` : "";
+    return `
+      <section class="spg" aria-label="Shots on goal per goal, season and last five games">
+        <div class="spg-head">
+          <span class="spg-label">Shots per goal</span>
+          <span class="spg-key">${esc(league)} · <small>shots–goals</small></span>
+        </div>
+        <div class="spg-grid">
+          <span></span>
+          <span class="spg-group" title="Shots on goal this team needs to score once">To score</span>
+          <span class="spg-group" title="Shots on goal opponents need to score once on this team">To allow</span>
+          <span></span>
+          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>
+          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>
+          ${spgTeamRow(game, "away")}
+          ${spgTeamRow(game, "home")}
+        </div>
+      </section>`;
+  }
+
   function fmtFormDate(iso) {
     if (!iso) return "";
     const d = new Date(iso);
@@ -634,6 +724,7 @@
         ${linescore(game)}
         ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
+        ${shotsPerGoalHtml(game)}
         ${goalLog(game)}
         ${lastFiveHtml(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
@@ -1016,5 +1107,6 @@
 
   loadLive();
   loadPeriods();
+  loadShots();
   scheduleLive();
 })();
