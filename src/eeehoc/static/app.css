@@ -602,6 +602,118 @@ main {
   color: var(--warn);
 }
 
+/* Shots on goal per goal: season and last five, to score and to allow. */
+.spg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.spg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--mono);
+}
+
+.spg-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.spg-key {
+  font-size: 0.58rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.spg-key small {
+  font-size: 0.52rem;
+  opacity: 0.85;
+}
+
+.spg-grid {
+  display: grid;
+  grid-template-columns: 2.6rem repeat(4, minmax(0, 1fr));
+  gap: 0.15rem 0.3rem;
+  align-items: stretch;
+  font-family: var(--mono);
+}
+
+.spg-group {
+  grid-column: span 2;
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  text-align: center;
+  padding-bottom: 0.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.spg-h {
+  font-size: 0.54rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.spg-name {
+  font-size: 0.66rem;
+  font-weight: 700;
+  align-self: center;
+}
+
+.spg-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  padding: 0.14rem 0.1rem;
+  border-radius: 0.28rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  font-variant-numeric: tabular-nums;
+}
+
+.spg-cell b {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.spg-cell small {
+  font-size: 0.5rem;
+  color: var(--muted);
+}
+
+.spg-cell.up {
+  border-color: rgba(125, 255, 179, 0.38);
+}
+
+.spg-cell.up b {
+  color: var(--accent);
+}
+
+.spg-cell.down {
+  border-color: rgba(255, 200, 87, 0.4);
+}
+
+.spg-cell.down b {
+  color: var(--warn);
+}
+
+.spg-cell.none {
+  border-style: dashed;
+  color: var(--muted);
+}
+
 /* Last five games for each team: result, then goals over shots on goal by period. */
 .last5 {
   display: flex;

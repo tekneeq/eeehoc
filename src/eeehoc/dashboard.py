@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from eeehoc.form import FormFeed
 from eeehoc.live import DATE_RE, LiveFeed
 from eeehoc.periods import PeriodFeed
+from eeehoc.shots import ShotsFeed
 from eeehoc.winprob import WinProbService, day_view
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -27,11 +28,13 @@ class DashboardState:
         periods: PeriodFeed | None = None,
         form: FormFeed | None = None,
         winprob: WinProbService | None = None,
+        shots: ShotsFeed | None = None,
     ) -> None:
         self.live = live or LiveFeed()
         self.periods = periods or PeriodFeed()
         self.form = form or FormFeed()
         self.winprob = winprob or WinProbService()
+        self.shots = shots or ShotsFeed()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -112,6 +115,13 @@ def make_handler(state: DashboardState):
                 except Exception as exc:  # noqa: BLE001
                     return self._send(502, _json_bytes({"error": str(exc)}), "application/json")
                 return self._send(200, _json_bytes(form), "application/json")
+
+            if path == "/api/shots":
+                try:
+                    board = state.shots.get()
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc), "teams": {}}), "application/json")
+                return self._send(200, _json_bytes(board), "application/json")
 
             if path == "/api/winprob":
                 season_q = (qs.get("season") or [""])[0].strip()
