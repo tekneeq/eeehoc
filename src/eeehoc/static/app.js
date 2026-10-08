@@ -9,6 +9,11 @@
     wp: { board: null, season: null, day: null, loading: false, error: null },
     filter: "all",
     expanded: new Set(),
+    collapsed: new Set(),
+    sort: "clock",
+    order: [],
+    dragId: null,
+    renderPending: false,
     dates: "",
     timer: null,
     loading: false,
@@ -134,9 +139,11 @@
       const res = await fetch(`/api/live${q ? `?${q}` : ""}`);
       const board = await res.json();
       if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      const dayChanged = board.day !== state.board?.day;
       state.board = board;
       state.error = board.error || null;
       if (!state.dates && board.day) state.anchor = board.day;
+      if (dayChanged) loadOrder();
     } catch (err) {
       state.error = err.message || String(err);
     } finally {
@@ -689,12 +696,29 @@
       if (game.venue) preBits.push(game.venue);
     }
     const headBits = [game.broadcast, game.state === "pre" ? "" : game.venue, ...(game.notes || [])].filter(Boolean);
+    const collapsed = state.collapsed.has(game.id);
+
+    if (collapsed) {
+      return `
+      <article class="chiclet collapsed state-${esc(game.state)}${pp}" data-id="${esc(game.id)}">
+        <header class="chiclet-head">
+          ${statusBadge(game)}
+          <span class="net">${esc(headBits[0] || "")}</span>
+          ${chicletTools(game, true)}
+        </header>
+        <div class="team-rows">
+          ${teamRow(game, "away")}
+          ${teamRow(game, "home")}
+        </div>
+      </article>`;
+    }
 
     return `
       <article class="chiclet state-${esc(game.state)}${pp}${expanded ? " expanded" : ""}" data-id="${esc(game.id)}">
         <header class="chiclet-head">
           ${statusBadge(game)}
           <span class="net">${esc(headBits.join(" · "))}</span>
+          ${chicletTools(game, false)}
         </header>
         <div class="team-rows">
           ${teamRow(game, "away")}
@@ -741,7 +765,180 @@
       </article>`;
   }
 
+  // ------------------------------------------------------- Order & collapse
+
+  const SORTS = ["clock", "start", "custom"];
+  const STATE_RANK = { in: 0, post: 1, pre: 2 };
+
+  function readStore(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function writeStore(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* private mode or quota: ordering just will not persist */
+    }
+  }
+
+  function currentDay() {
+    return state.dates
+      ? `${state.dates.slice(0, 4)}-${state.dates.slice(4, 6)}-${state.dates.slice(6, 8)}`
+      : state.board?.day || "";
+  }
+
+  function loadPrefs() {
+    const sort = readStore("eeehoc.sort", "clock");
+    state.sort = SORTS.includes(sort) ? sort : "clock";
+    state.collapsed = new Set(readStore("eeehoc.collapsed", []));
+  }
+
+  function loadOrder() {
+    state.order = readStore(`eeehoc.order.${currentDay()}`, []);
+    if (state.sort === "custom" && !state.order.length) state.sort = "clock";
+  }
+
+  function saveOrder() {
+    writeStore(`eeehoc.order.${currentDay()}`, state.order);
+    writeStore("eeehoc.sort", state.sort);
+  }
+
+  function saveCollapsed() {
+    writeStore("eeehoc.collapsed", [...state.collapsed]);
+  }
+
+  // "Clock": the game that has been going longest comes first — 2nd period 5:00 left
+  // sits above 1st period 10:00 left — then finals (earliest start first), then upcoming.
+  function clockKey(g) {
+    const rank = STATE_RANK[g.state] ?? 3;
+    if (g.state === "in") return [rank, -(g.elapsed_sec ?? 0), g.date || ""];
+    return [rank, g.date || "", 0];
+  }
+
+  function compareKeys(a, b) {
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] < b[i]) return -1;
+      if (a[i] > b[i]) return 1;
+    }
+    return 0;
+  }
+
+  function sortedGames(games) {
+    const list = [...games];
+    if (state.sort === "start") {
+      return list.sort((a, b) => compareKeys([a.date || "", a.id], [b.date || "", b.id]));
+    }
+    const byClock = list.sort((a, b) => compareKeys(clockKey(a), clockKey(b)));
+    if (state.sort !== "custom") return byClock;
+    const rank = new Map(state.order.map((id, i) => [id, i]));
+    // Games the saved order does not know about keep their clock position at the end.
+    return byClock.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+  }
+
+  function visibleGames() {
+    const games = (state.board?.games || []).filter((g) => state.filter === "all" || g.state === state.filter);
+    return sortedGames(games);
+  }
+
+  function adoptOrder(ids) {
+    const all = sortedGames(state.board?.games || []).map((g) => g.id);
+    const shown = new Set(ids);
+    // Hidden (filtered-out) games keep their relative position after the shown ones.
+    state.order = [...ids, ...all.filter((id) => !shown.has(id))];
+    state.sort = "custom";
+    saveOrder();
+  }
+
+  function moveGame(id, delta) {
+    const ids = visibleGames().map((g) => g.id);
+    const from = ids.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, id);
+    adoptOrder(ids);
+    renderLive();
+  }
+
+  function toggleCollapsed(id, force) {
+    const next = force === undefined ? !state.collapsed.has(id) : force;
+    if (next) state.collapsed.add(id);
+    else state.collapsed.delete(id);
+    saveCollapsed();
+  }
+
+  function collapseAll() {
+    const ids = visibleGames().map((g) => g.id);
+    const allCollapsed = ids.length > 0 && ids.every((id) => state.collapsed.has(id));
+    ids.forEach((id) => toggleCollapsed(id, !allCollapsed));
+    renderLive();
+  }
+
+  function gridColumns(grid) {
+    return getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
+  }
+
+  function onDragStart(ev) {
+    const handle = ev.target.closest("[data-act='drag']");
+    const card = handle?.closest(".chiclet");
+    if (!card) {
+      ev.preventDefault();
+      return;
+    }
+    state.dragId = card.dataset.id;
+    card.classList.add("dragging");
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", state.dragId);
+    ev.dataTransfer.setDragImage(card, 24, 24);
+  }
+
+  function onDragOver(ev) {
+    if (!state.dragId) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "move";
+    const grid = $("#liveGrid");
+    const over = ev.target.closest(".chiclet");
+    const dragged = grid.querySelector(`.chiclet[data-id="${CSS.escape(state.dragId)}"]`);
+    if (!over || !dragged || over === dragged) return;
+    const rect = over.getBoundingClientRect();
+    const before =
+      gridColumns(grid) > 1 ? ev.clientX < rect.left + rect.width / 2 : ev.clientY < rect.top + rect.height / 2;
+    const target = before ? over : over.nextElementSibling;
+    if (target !== dragged && target !== dragged.nextElementSibling) grid.insertBefore(dragged, target);
+  }
+
+  function onDragEnd() {
+    const grid = $("#liveGrid");
+    const dragged = grid.querySelector(".chiclet.dragging");
+    dragged?.classList.remove("dragging");
+    if (!state.dragId) return;
+    state.dragId = null;
+    adoptOrder([...grid.querySelectorAll(".chiclet")].map((c) => c.dataset.id));
+    renderLive();
+  }
+
+  function chicletTools(game, collapsed) {
+    return `
+      <span class="chiclet-tools">
+        <button type="button" class="tool" data-act="up" title="Move up">▲</button>
+        <button type="button" class="tool" data-act="down" title="Move down">▼</button>
+        <span class="tool handle" data-act="drag" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</span>
+        <button type="button" class="tool" data-act="collapse" title="${collapsed ? "Expand" : "Collapse"}" aria-expanded="${!collapsed}">${collapsed ? "▸" : "▾"}</button>
+      </span>`;
+  }
+
   function renderLive() {
+    if (state.dragId) {
+      state.renderPending = true;
+      return;
+    }
+    state.renderPending = false;
     const grid = $("#liveGrid");
     const meta = $("#liveMeta");
     const badge = $("#liveBadge");
@@ -779,8 +976,14 @@
     document.querySelectorAll("#liveFilter .chip").forEach((chip) => {
       chip.classList.toggle("active", chip.dataset.state === state.filter);
     });
+    document.querySelectorAll("#liveSort .chip").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.sort === state.sort);
+      if (chip.dataset.sort === "custom") chip.disabled = !state.order.length;
+    });
 
-    const games = (board.games || []).filter((g) => state.filter === "all" || g.state === state.filter);
+    const games = visibleGames();
+    const allCollapsed = games.length > 0 && games.every((g) => state.collapsed.has(g.id));
+    $("#liveCollapse").textContent = allCollapsed ? "Expand all" : "Collapse all";
     if (!games.length) {
       grid.innerHTML = `<p class="lede">No games in this view.</p>`;
       return;
@@ -796,9 +999,21 @@
     const id = card?.dataset.id;
     const game = state.board?.games.find((g) => g.id === id);
     if (!game) return;
-    if (state.expanded.has(id)) state.expanded.delete(id);
-    else state.expanded.add(id);
-    card.outerHTML = chicletHtml(game);
+    const act = btn.dataset.act;
+    if (act === "up" || act === "down") {
+      moveGame(id, act === "up" ? -1 : 1);
+      return;
+    }
+    if (act === "collapse") {
+      toggleCollapsed(id);
+      renderLive(); // the "Collapse all" label depends on every card
+      return;
+    }
+    if (act === "toggle") {
+      if (state.expanded.has(id)) state.expanded.delete(id);
+      else state.expanded.add(id);
+      card.outerHTML = chicletHtml(game);
+    }
   }
 
   function stepDay(delta) {
@@ -1103,8 +1318,22 @@
     state.filter = chip.dataset.state;
     renderLive();
   });
-  $("#liveGrid").addEventListener("click", onGridClick);
+  $("#liveSort").addEventListener("click", (ev) => {
+    const chip = ev.target.closest("button[data-sort]");
+    if (!chip || chip.disabled) return;
+    state.sort = chip.dataset.sort;
+    writeStore("eeehoc.sort", state.sort);
+    renderLive();
+  });
+  $("#liveCollapse").addEventListener("click", collapseAll);
+  const liveGrid = $("#liveGrid");
+  liveGrid.addEventListener("click", onGridClick);
+  liveGrid.addEventListener("dragstart", onDragStart);
+  liveGrid.addEventListener("dragover", onDragOver);
+  liveGrid.addEventListener("drop", (ev) => ev.preventDefault());
+  liveGrid.addEventListener("dragend", onDragEnd);
 
+  loadPrefs();
   loadLive();
   loadPeriods();
   loadShots();

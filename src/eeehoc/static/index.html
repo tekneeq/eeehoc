@@ -58,8 +58,14 @@
             <button type="button" class="chip" data-state="post">Final</button>
             <button type="button" class="chip" data-state="pre">Upcoming</button>
           </div>
+          <div class="chip-group" id="liveSort" role="group" aria-label="Order games">
+            <button type="button" class="chip" data-sort="clock" title="Furthest-along game first: live by game clock, then finals, then upcoming">Clock</button>
+            <button type="button" class="chip" data-sort="start" title="Scheduled start time">Start</button>
+            <button type="button" class="chip" data-sort="custom" title="Your order — drag the ⋮⋮ handle or use ▲ ▼ on a chiclet">Mine</button>
+          </div>
           <div class="live-status">
             <span id="liveMeta" class="live-meta">Loading scoreboard…</span>
+            <button type="button" class="refresh" id="liveCollapse" title="Collapse or expand every chiclet">Collapse all</button>
             <button type="button" class="refresh" id="liveRefresh" title="Refresh now">Refresh</button>
           </div>
         </div>
