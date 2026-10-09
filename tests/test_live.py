@@ -568,7 +568,10 @@ def test_dashboard_live_api():
         assert live["home"]["stats"]["shots"] == "26"
         html = urllib.request.urlopen(base + "/", timeout=5).read().decode()
         assert 'id="liveGrid"' in html
-        assert "chiclet" in urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
+        assert 'id="liveSort"' in html and 'data-sort="clock"' in html and 'id="liveCollapse"' in html
+        script = urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
+        assert "chiclet" in script
+        assert all(token in script for token in ('data-act="collapse"', 'data-act="drag"', "elapsed_sec", "eeehoc.order."))
         assert urllib.request.urlopen(base + "/health", timeout=5).read() == b"ok\n"
 
         try:
