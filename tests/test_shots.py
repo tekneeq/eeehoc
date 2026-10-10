@@ -75,9 +75,10 @@ def test_shots_per_goal_totals_and_ratios():
     assert totals["games"] == 2
     assert (totals["gf"], totals["ga"], totals["sog_f"], totals["sog_a"]) == (5, 8, 56, 45)
     assert totals["spg_f"] == 11.2 and totals["spg_a"] == 5.6
+    assert totals["sogpg_f"] == 28.0 and totals["sogpg_a"] == 22.5
     assert totals["shooting_pct"] == 8.9 and totals["save_pct"] == 82.2
     assert shots_per_goal([{"gf": 0, "ga": 1, "sog_f": 20, "sog_a": 10}])["spg_f"] is None
-    assert shots_per_goal([])["spg_f"] is None
+    assert shots_per_goal([])["sogpg_f"] is None
 
 
 def test_build_shots_uses_regular_season_and_keeps_six_recent():
@@ -87,12 +88,14 @@ def test_build_shots_uses_regular_season_and_keeps_six_recent():
     buf = board["teams"][BUF]
     assert buf["abbr"] == "BUF"
     assert buf["season"]["games"] == 2 and buf["season"]["gf"] == 5 and buf["season"]["sog_f"] == 48
+    assert buf["season"]["sogpg_f"] == 24.0 and buf["season"]["sogpg_a"] == 26.5
     assert [g["id"] for g in buf["recent"]] == ["p1", "r1", "r2"]
     assert buf["recent"][0]["preseason"] is True and buf["recent"][-1]["opponent"] == "DET"
     det = board["teams"][DET]
     assert det["season"]["games"] == 1 and det["recent"][0]["venue"] == "home"
     assert board["league"]["games"] == 2  # two regular-season games, not four team-games
     assert board["league"]["spg"] == round((26 + 23 + 22 + 30) / (3 + 6 + 2 + 2), 1)
+    assert board["league"]["sog"] == round((26 + 23 + 22 + 30) / 4, 1)
 
     # Before opening night only preseason exists: use it, and say so.
     early = build_shots(rows, today=date(2026, 9, 30), season_year=2027, season_label="2026-27")
