@@ -732,6 +732,12 @@ main {
   opacity: 0.85;
 }
 
+.spg-next {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
 .spg-grid {
   display: grid;
   grid-template-columns: 2.6rem repeat(4, minmax(0, 1fr));

@@ -534,6 +534,8 @@
     }
     t.spg_f = t.gf ? Math.round((t.sog_f / t.gf) * 10) / 10 : null;
     t.spg_a = t.ga ? Math.round((t.sog_a / t.ga) * 10) / 10 : null;
+    t.sogpg_f = t.games ? Math.round((t.sog_f / t.games) * 10) / 10 : null;
+    t.sogpg_a = t.games ? Math.round((t.sog_a / t.games) * 10) / 10 : null;
     return t;
   }
 
@@ -554,6 +556,42 @@
     const main = value === null ? "∞" : value.toFixed(1);
     const tip = `${shots} shots on goal, ${goals} goal${goals === 1 ? "" : "s"} over ${totals.games} game${totals.games === 1 ? "" : "s"}`;
     return `<span class="spg-cell ${spgTone(value, league, kind)}" title="${esc(tip)}"><b>${main}</b><small>${shots}–${goals}</small></span>`;
+  }
+
+  // Volume: more shots for than the league is good, fewer shots allowed is good.
+  function volumeTone(value, league, kind) {
+    if (value === null || value === undefined || !league) return "";
+    const edge = (value - league) / league;
+    if (Math.abs(edge) < 0.1) return "";
+    const good = kind === "for" ? edge > 0 : edge < 0;
+    return good ? "up" : "down";
+  }
+
+  function sogCell(totals, kind, league) {
+    const value = kind === "for" ? totals.sogpg_f : totals.sogpg_a;
+    const shots = kind === "for" ? totals.sog_f : totals.sog_a;
+    if (!totals.games || value === null || value === undefined) {
+      return `<span class="spg-cell none"><b>–</b><small>no games</small></span>`;
+    }
+    const what = kind === "for" ? "shots on goal" : "shots on goal allowed";
+    const tip = `${shots} ${what} over ${totals.games} game${totals.games === 1 ? "" : "s"}`;
+    return `<span class="spg-cell ${volumeTone(value, league, kind)}" title="${esc(tip)}"><b>${value.toFixed(1)}</b><small>${shots} in ${totals.games}</small></span>`;
+  }
+
+  function sogTeamRow(game, side) {
+    const team = game[side];
+    const row = state.shots?.teams?.[team.id];
+    const league = state.shots?.league?.sog;
+    if (!row) {
+      return `<span class="spg-name" style="color:${teamColor(team)}">${esc(team.abbr)}</span><span class="spg-cell none" style="grid-column: span 4"><small>no finished games yet</small></span>`;
+    }
+    const recent = spgTotals((row.recent || []).filter((g) => g.id !== game.id).slice(-(state.shots.recent_games || 5)));
+    return `
+      <span class="spg-name" style="color:${teamColor(team)}">${esc(team.abbr)}</span>
+      ${sogCell(row.season, "for", league)}
+      ${sogCell(recent, "for", league)}
+      ${sogCell(row.season, "against", league)}
+      ${sogCell(recent, "against", league)}`;
   }
 
   function spgTeamRow(game, side) {
@@ -577,21 +615,33 @@
     if (!shots || !shots.teams) return "";
     const seasonLabel = shots.season_kind === "preseason" ? "Preseason" : "Season";
     const league = shots.league?.spg ? `League ${shots.league.spg.toFixed(1)}` : "";
+    const leagueSog = shots.league?.sog ? `League ${shots.league.sog.toFixed(1)}` : "";
+    const columns = (forLabel, forTitle, againstLabel, againstTitle) => `
+          <span></span>
+          <span class="spg-group" title="${esc(forTitle)}">${esc(forLabel)}</span>
+          <span class="spg-group" title="${esc(againstTitle)}">${esc(againstLabel)}</span>
+          <span></span>
+          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>
+          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>`;
     return `
-      <section class="spg" aria-label="Shots on goal per goal, season and last five games">
+      <section class="spg" aria-label="Shots on goal per goal and per game, season and last five">
         <div class="spg-head">
           <span class="spg-label">Shots per goal</span>
           <span class="spg-key">${esc(league)} · <small>shots–goals</small></span>
         </div>
         <div class="spg-grid">
-          <span></span>
-          <span class="spg-group" title="Shots on goal this team needs to score once">To score</span>
-          <span class="spg-group" title="Shots on goal opponents need to score once on this team">To allow</span>
-          <span></span>
-          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>
-          <span class="spg-h">${esc(seasonLabel)}</span><span class="spg-h">Last 5</span>
+          ${columns("To score", "Shots on goal this team needs to score once", "To allow", "Shots on goal opponents need to score once on this team")}
           ${spgTeamRow(game, "away")}
           ${spgTeamRow(game, "home")}
+        </div>
+        <div class="spg-head spg-next">
+          <span class="spg-label">Shots per game</span>
+          <span class="spg-key">${esc(leagueSog)} · <small>on goal</small></span>
+        </div>
+        <div class="spg-grid">
+          ${columns("For", "Shots on goal per game", "Allowed", "Shots on goal allowed per game")}
+          ${sogTeamRow(game, "away")}
+          ${sogTeamRow(game, "home")}
         </div>
       </section>`;
   }

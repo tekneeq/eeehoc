@@ -1,4 +1,4 @@
-"""Shots on goal per goal for every team: season to date and the last five games.
+"""Shots on goal for every team: per goal and per game, season to date and the last five.
 
 ESPN's month scoreboard carries each side's ``goals`` (regulation + overtime, no
 shootout) and ``saves``, so a team's shots on goal in a game is the opponent's
@@ -97,6 +97,12 @@ def _ratio(shots: int, goals: int) -> float | None:
     return round(shots / goals, 1)
 
 
+def _per_game(total: int, games: int) -> float | None:
+    if games <= 0:
+        return None
+    return round(total / games, 1)
+
+
 def shots_per_goal(games: list[dict[str, Any]]) -> dict[str, Any]:
     """Totals over ``games`` and the shots-on-goal-per-goal ratios both ways."""
     with_shots = [g for g in games if g["sog_f"] is not None and g["sog_a"] is not None]
@@ -112,6 +118,8 @@ def shots_per_goal(games: list[dict[str, Any]]) -> dict[str, Any]:
         "sog_a": sog_a,
         "spg_f": _ratio(sog_f, gf),  # shots it takes this team to score
         "spg_a": _ratio(sog_a, ga),  # shots opponents need to score on it
+        "sogpg_f": _per_game(sog_f, len(with_shots)),  # shots on goal per game
+        "sogpg_a": _per_game(sog_a, len(with_shots)),  # shots on goal allowed per game
         "shooting_pct": round(100 * gf / sog_f, 1) if sog_f else None,
         "save_pct": round(100 * (1 - ga / sog_a), 1) if sog_a else None,
     }
@@ -170,7 +178,12 @@ def build_shots(rows: list[dict[str, Any]], *, today: date, season_year: int, se
         "season_kind": season_kind,
         "as_of": today.isoformat(),
         "recent_games": RECENT_GAMES,
-        "league": {"games": league["games"] // 2, "spg": league["spg_f"], "shooting_pct": league["shooting_pct"]},
+        "league": {
+            "games": league["games"] // 2,
+            "spg": league["spg_f"],
+            "sog": league["sogpg_f"],
+            "shooting_pct": league["shooting_pct"],
+        },
         "teams": teams,
     }
 
