@@ -478,7 +478,8 @@ main {
 
 .rink {
   width: 100%;
-  height: 4.4rem;
+  height: auto;
+  aspect-ratio: 200 / 85;
   display: block;
   border-radius: 0.45rem;
   border: 1px solid rgba(159, 212, 255, 0.2);
@@ -525,6 +526,15 @@ main {
   fill: #111;
   stroke: #fff;
   stroke-width: 0.45;
+}
+
+.rink .netminder {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  stroke: #0c1c28;
+  stroke-width: 2.5px;
+  paint-order: stroke fill;
 }
 
 .down-line {
