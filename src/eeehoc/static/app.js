@@ -221,6 +221,24 @@
     return `#${hex}`;
   }
 
+  // "J. Swayman" -> "Swayman". The box-score list is most ice time first, so the
+  // starter (still the one in the net almost always) wins over the probable.
+  function netminder(team) {
+    const played = (team?.goalies || []).find((g) => g && g.name);
+    const raw = String((played && played.name) || team?.goalie || "").trim();
+    if (!raw) return "";
+    const parts = raw.split(/\s+/);
+    return (parts.length > 1 ? parts[parts.length - 1] : raw).replace(/\.$/, "");
+  }
+
+  function rinkGoalie(team, x) {
+    const name = netminder(team);
+    if (!name) return "";
+    const played = (team.goalies || []).find((g) => g && g.name);
+    const tip = [played?.name || team.goalie, played?.saves ? `${played.saves} SV` : ""].filter(Boolean).join(", ");
+    return `<text class="netminder" x="${x}" y="42.5" text-anchor="middle" dominant-baseline="middle" fill="${teamColor(team)}" font-size="7">${esc(name)}<title>${esc(tip)}</title></text>`;
+  }
+
   function rinkSvg(game) {
     const lp = game.situation?.last_play;
     const x = lp && typeof lp.x === "number" ? Math.max(-100, Math.min(100, lp.x)) : null;
@@ -229,8 +247,11 @@
       x === null
         ? ""
         : `<circle class="puck" cx="${(x + 100).toFixed(1)}" cy="${(42.5 - y).toFixed(1)}" r="2.1" />`;
+    const awayG = netminder(game.away);
+    const homeG = netminder(game.home);
+    const who = [awayG && `${game.away.abbr} ${awayG}`, homeG && `${game.home.abbr} ${homeG}`].filter(Boolean).join(", ");
     return `
-      <svg class="rink" viewBox="0 0 200 85" role="img" aria-label="Rink, last play">
+      <svg class="rink" viewBox="0 0 200 85" role="img" aria-label="Rink, last play${who ? `. Goalies ${esc(who)}` : ""}">
         <rect class="ice" x="1" y="1" width="198" height="83" rx="16" />
         <line class="goal-line" x1="11" y1="8" x2="11" y2="77" />
         <line class="goal-line" x1="189" y1="8" x2="189" y2="77" />
@@ -245,6 +266,8 @@
         <circle class="faceoff" cx="131" cy="63" r="1" />
         <path class="crease" d="M11 34 v17 a8 8 0 0 0 0 -17 z" />
         <path class="crease" d="M189 34 v17 a8 8 0 0 1 0 -17 z" />
+        ${rinkGoalie(game.away, 43)}
+        ${rinkGoalie(game.home, 157)}
         ${puck}
       </svg>`;
   }
