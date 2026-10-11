@@ -580,6 +580,7 @@ def test_dashboard_live_api():
                 "eeehoc.order.",
                 "netminder",
                 "goalie_rank",
+                "goalie_save_pct",
                 "goalie_depth",
                 "starterCaption",
             )
