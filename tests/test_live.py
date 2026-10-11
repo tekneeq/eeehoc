@@ -664,6 +664,7 @@ def test_rank_label_depth_and_season_starts():
     assert season_starts(stats, 2027) == (5, 3)
     assert season_starts(stats, 2025) == (0, 0)
     assert season_starts(None, 2027) is None
+    assert season_starts({}, 2027) == (0, 0)
     assert season_starts({"categories": []}, 2027) == (0, 0)
 
     assert roster_goalies(
@@ -784,7 +785,7 @@ def _counting(games, starts):
     }
 
 
-def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False):
+def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False, prospect_404=False):
     summary = {
         "boxscore": {
             "teams": [],
@@ -823,6 +824,7 @@ def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False):
                         "items": [
                             {"id": "4392765", "shortName": "M. DiPietro"},
                             {"id": "4712036", "shortName": "J. Swayman"},
+                            *([{"id": "999", "shortName": "A. Prospect"}] if prospect_404 else []),
                         ],
                     }
                 ]
@@ -839,6 +841,8 @@ def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False):
                     }
                 ]
             }
+        if url.endswith("/athletes/999/stats"):
+            raise RuntimeError("Live feed HTTP 404 for https://example.test/athletes/999/stats")
         if url.endswith("/athletes/4712036/stats"):
             return _counting(5, 5)
         if url.endswith("/athletes/4392765/stats"):
@@ -927,3 +931,15 @@ def test_goalie_depth_is_omitted_when_the_chart_is_incomplete():
         assert home["record"] == "4-2-0"
         assert home["goalie_depth"] is None
         assert home["goalies"][0]["depth"] is None
+
+
+def test_roster_goalie_without_a_stats_page_sorts_as_zero_starts():
+    from eeehoc.live import LiveFeed
+
+    feed = LiveFeed(_goalie_fetch([], prospect_404=True), ttl=100)
+    home = next(game for game in feed.get()["games"] if game["id"] == "1")["home"]
+    assert home["goalie_depth"] == 1
+    assert home["goalie_starts"] == 5
+    # Prospect and DiPietro both have 0 starts; the name puts the prospect second.
+    assert home["goalies"][1]["depth"] == 3
+    assert home["goalies"][1]["starts"] == 0

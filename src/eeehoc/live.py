@@ -547,7 +547,7 @@ def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int
     ``None`` when the stats payload never arrived. ``(0, 0)`` when it did
     and this season has no row yet. A mid-season trade is two rows; both count.
     """
-    if not payload or season_year <= 0:
+    if payload is None or season_year <= 0:
         return None
     games = starts = 0
     found = False
@@ -946,7 +946,11 @@ class LiveFeed:
             key, ttl, url = job
             try:
                 return key, ttl, self._fetch(url)
-            except Exception:  # noqa: BLE001 - one goalie card must not blank the board
+            except Exception as exc:  # noqa: BLE001 - one goalie card must not blank the board
+                # A prospect on the roster often has no stats page. That is zero
+                # starts, not a missing chart. Other failures stay unknown.
+                if "HTTP 404" in str(exc):
+                    return key, ttl, {}
                 return key, GOALIE_MISS_TTL, None
 
         with ThreadPoolExecutor(max_workers=min(self._workers, len(missing))) as pool:
