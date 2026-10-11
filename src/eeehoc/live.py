@@ -14,12 +14,19 @@ from typing import Any, Callable
 
 SCOREBOARD_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"
 SUMMARY_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/summary?event={event_id}"
+ATHLETE_URL = "https://site.web.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/{athlete_id}"
+ATHLETE_STATS_URL = "https://site.web.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/{athlete_id}/stats"
+ROSTER_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/teams/{team_id}/roster"
 USER_AGENT = "eeehoc/0.1 (+https://github.com/tekneeq/eeehoc)"
 
 SCOREBOARD_TTL = 20.0  # seconds
 SUMMARY_TTL_LIVE = 20.0
 SUMMARY_TTL_FINAL = 15 * 60.0
 FORCE_MIN_INTERVAL = 5.0
+# Rank and starts move when games end, not on every scoreboard tick.
+GOALIE_STATS_TTL = 30 * 60.0
+GOALIE_ROSTER_TTL = 6 * 3600.0
+GOALIE_MISS_TTL = 10 * 60.0
 
 REGULATION_PERIODS = 3
 PERIOD_SECONDS = 20 * 60
@@ -234,6 +241,15 @@ def _probable_goalie(comp: dict[str, Any]) -> str:
     return ""
 
 
+def _probable_goalie_id(comp: dict[str, Any]) -> str:
+    for item in comp.get("probables") or []:
+        if item.get("name") != "probableStartingGoalie":
+            continue
+        athlete = item.get("athlete") or {}
+        return str(athlete.get("id") or "")
+    return ""
+
+
 def _leaders(raw: list[dict[str, Any]] | None, team_id: str) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {}
     for cat in raw or []:
@@ -313,6 +329,7 @@ def _competitor(comp: dict[str, Any]) -> dict[str, Any]:
         "linescores": linescores,
         "winner": bool(comp.get("winner", False)),
         "goalie": _probable_goalie(comp),
+        "goalie_id": _probable_goalie_id(comp),
         "leaders": _leaders(comp.get("leaders"), str(team.get("id") or "")),
         "stats": {},
         "goalies": [],
@@ -491,6 +508,101 @@ def _toi_seconds(toi: str) -> int:
         return 0
 
 
+def rank_label(display: str, rank: Any = None) -> str:
+    """Compact league rank: ``8th`` -> ``#8``, ``Tied-1st`` -> ``T1``."""
+    text = str(display or "").strip()
+    tied = text.lower().startswith("tied")
+    number = _int(rank) if rank not in (None, "") else 0
+    if number <= 0:
+        match = re.search(r"\d+", text)
+        number = int(match.group()) if match else 0
+    if number <= 0:
+        return ""
+    return f"T{number}" if tied else f"#{number}"
+
+
+def goalie_rates(overview: dict[str, Any] | None) -> tuple[str, str, str]:
+    """Save-percentage rank, SV%, and GAA from an athlete overview.
+
+    The rank is ESPN's league rank for save percentage. An empty rank means
+    the goalie is not ranked (too few shots, or the card did not load).
+    """
+    if not overview:
+        return "", "", ""
+    athlete = overview.get("athlete") if isinstance(overview.get("athlete"), dict) else {}
+    stats = ((athlete or {}).get("statsSummary") or {}).get("statistics") or []
+    by_name = {str(row.get("name") or ""): row for row in stats if isinstance(row, dict)}
+    sv = by_name.get("savePct") or {}
+    gaa = by_name.get("avgGoalsAgainst") or {}
+    return (
+        rank_label(str(sv.get("rankDisplayValue") or ""), sv.get("rank")),
+        str(sv.get("displayValue") or ""),
+        str(gaa.get("displayValue") or ""),
+    )
+
+
+def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int, int] | None:
+    """``(games, games started)`` for ``season_year``.
+
+    ``None`` when the stats payload never arrived. ``(0, 0)`` when it did
+    and this season has no row yet. A mid-season trade is two rows; both count.
+    """
+    if not payload or season_year <= 0:
+        return None
+    games = starts = 0
+    found = False
+    for cat in payload.get("categories") or []:
+        names = [str(name) for name in cat.get("names") or []]
+        try:
+            games_at = names.index("games")
+            starts_at = names.index("gameStarted")
+        except ValueError:
+            continue
+        for row in cat.get("statistics") or []:
+            if _int((row.get("season") or {}).get("year")) != season_year:
+                continue
+            values = row.get("stats") or []
+            found = True
+            games += _int(values[games_at]) if games_at < len(values) else 0
+            starts += _int(values[starts_at]) if starts_at < len(values) else 0
+    if not found:
+        return (0, 0)
+    return games, starts
+
+
+def roster_goalies(payload: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not payload:
+        return []
+    found: list[dict[str, str]] = []
+    for group in payload.get("athletes") or []:
+        if str(group.get("position") or "") != "Goalies":
+            continue
+        for item in group.get("items") or []:
+            goalie_id = str(item.get("id") or "")
+            if not goalie_id:
+                continue
+            found.append(
+                {
+                    "id": goalie_id,
+                    "name": str(item.get("shortName") or item.get("displayName") or ""),
+                }
+            )
+    return found
+
+
+def depth_by_starts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Map athlete id to a 1-based depth number, most starts first.
+
+    ESPN's core depth chart still lists retired goalies, so this order is
+    games started this season, then games played, then name.
+    """
+    ordered = sorted(
+        (row for row in rows if row.get("id")),
+        key=lambda row: (-_int(row.get("starts")), -_int(row.get("games")), str(row.get("name") or "")),
+    )
+    return {str(row["id"]): index for index, row in enumerate(ordered, start=1)}
+
+
 def _goalies(summary: dict[str, Any], home_id: str, away_id: str) -> dict[str, list[dict[str, str]]]:
     out: dict[str, list[dict[str, str]]] = {"home": [], "away": []}
     for group in (summary.get("boxscore") or {}).get("players") or []:
@@ -507,6 +619,7 @@ def _goalies(summary: dict[str, Any], home_id: str, away_id: str) -> dict[str, l
                 stats = row.get("stats") or []
                 rows.append(
                     {
+                        "id": str(person.get("id") or ""),
                         "name": str(person.get("shortName") or person.get("displayName") or ""),
                         "saves": _indexed(labels, stats, "SV"),
                         "save_pct": _indexed(labels, stats, "SV%"),
@@ -796,6 +909,8 @@ class LiveFeed:
         self._lock = threading.Lock()
         self._boards: dict[str, tuple[float, dict[str, Any]]] = {}
         self._summaries: dict[str, tuple[float, dict[str, Any], str]] = {}
+        # key -> (stored_at, ttl, payload or None)
+        self._goalie_cache: dict[str, tuple[float, float, Any]] = {}
         self._last_error: str | None = None
 
     @property
@@ -814,6 +929,161 @@ class LiveFeed:
             return cached[1] if cached else None
         self._summaries[gid] = (now, summary, game["state"])
         return summary
+
+    def _load_cached(self, jobs: list[tuple[str, float, str]], now: float) -> dict[str, Any]:
+        found: dict[str, Any] = {}
+        missing: list[tuple[str, float, str]] = []
+        for key, ttl, url in jobs:
+            hit = self._goalie_cache.get(key)
+            if hit is not None and now - hit[0] < hit[1]:
+                found[key] = hit[2]
+            else:
+                missing.append((key, ttl, url))
+        if not missing:
+            return found
+
+        def load(job: tuple[str, float, str]) -> tuple[str, float, Any]:
+            key, ttl, url = job
+            try:
+                return key, ttl, self._fetch(url)
+            except Exception:  # noqa: BLE001 - one goalie card must not blank the board
+                return key, GOALIE_MISS_TTL, None
+
+        with ThreadPoolExecutor(max_workers=min(self._workers, len(missing))) as pool:
+            for key, ttl, payload in pool.map(load, missing):
+                self._goalie_cache[key] = (now, ttl if payload is not None else GOALIE_MISS_TTL, payload)
+                found[key] = payload
+        return found
+
+    def _annotate_goalies(self, board: dict[str, Any], now: float) -> None:
+        """Attach SV% rank, starts-based depth, and games started to each goalie.
+
+        The team record already lives on the competitor; the rink prints it
+        beside the goalie's name. Depth is not ESPN's published chart (that
+        feed still lists retired goalies). It is 1..n by games started.
+        """
+        season = _int(board.get("season"))
+        if season <= 0:
+            return
+        teams = [game[side] for game in board.get("games") or [] for side in ("home", "away")]
+
+        def known_ids(team: dict[str, Any]) -> list[str]:
+            found: list[str] = []
+            for goalie in team.get("goalies") or []:
+                goalie_id = str(goalie.get("id") or "")
+                if goalie_id and goalie_id not in found:
+                    found.append(goalie_id)
+            probable = str(team.get("goalie_id") or "")
+            if probable and probable not in found:
+                found.append(probable)
+            return found
+
+        interesting = [team for team in teams if team.get("id") and known_ids(team)]
+        if not interesting:
+            return
+        team_ids = sorted({str(team["id"]) for team in interesting})
+        rosters_raw = self._load_cached(
+            [(f"roster:{team_id}", GOALIE_ROSTER_TTL, ROSTER_URL.format(team_id=team_id)) for team_id in team_ids],
+            now,
+        )
+        roster_ok = {team_id: rosters_raw.get(f"roster:{team_id}") is not None for team_id in team_ids}
+        rosters = {team_id: roster_goalies(rosters_raw.get(f"roster:{team_id}")) for team_id in team_ids}
+
+        stat_ids: set[str] = set()
+        show_ids: set[str] = set()
+        for team_id, goalies in rosters.items():
+            if roster_ok[team_id]:
+                stat_ids.update(goalie["id"] for goalie in goalies)
+        for team in interesting:
+            ids = known_ids(team)
+            stat_ids.update(ids)
+            show_ids.update(ids)
+        if not stat_ids and not show_ids:
+            return
+        jobs: list[tuple[str, float, str]] = [
+            (f"stats:{goalie_id}:{season}", GOALIE_STATS_TTL, ATHLETE_STATS_URL.format(athlete_id=goalie_id))
+            for goalie_id in sorted(stat_ids)
+        ]
+        jobs.extend(
+            (f"card:{goalie_id}", GOALIE_STATS_TTL, ATHLETE_URL.format(athlete_id=goalie_id))
+            for goalie_id in sorted(show_ids)
+        )
+        cards = self._load_cached(jobs, now)
+
+        counted: dict[str, tuple[int, int]] = {}
+        for goalie_id in stat_ids:
+            row = season_starts(cards.get(f"stats:{goalie_id}:{season}"), season)
+            if row is not None:
+                counted[goalie_id] = row
+
+        depths: dict[str, dict[str, int]] = {}
+        for team_id in team_ids:
+            if not roster_ok[team_id]:
+                continue
+            rows: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            complete = True
+            for goalie in rosters[team_id]:
+                seen.add(goalie["id"])
+                row = counted.get(goalie["id"])
+                if row is None:
+                    complete = False
+                    break
+                rows.append({"id": goalie["id"], "name": goalie["name"], "games": row[0], "starts": row[1]})
+            if not complete:
+                continue
+            for team in interesting:
+                if str(team["id"]) != team_id:
+                    continue
+                for goalie_id in known_ids(team):
+                    if goalie_id in seen:
+                        continue
+                    row = counted.get(goalie_id)
+                    if row is None:
+                        complete = False
+                        break
+                    rows.append({"id": goalie_id, "name": "", "games": row[0], "starts": row[1]})
+                    seen.add(goalie_id)
+                if not complete:
+                    break
+            if complete and rows:
+                depths[team_id] = depth_by_starts(rows)
+
+        def write(goalie: dict[str, Any], goalie_id: str, team_id: str) -> None:
+            rank, save_pct, gaa = goalie_rates(cards.get(f"card:{goalie_id}"))
+            counted_row = counted.get(goalie_id)
+            goalie["rank"] = rank
+            goalie["save_pct_season"] = save_pct
+            goalie["gaa"] = gaa
+            goalie["starts"] = counted_row[1] if counted_row else None
+            goalie["depth"] = (depths.get(team_id) or {}).get(goalie_id)
+
+        for team in interesting:
+            team_id = str(team["id"])
+            for goalie in team.get("goalies") or []:
+                goalie_id = str(goalie.get("id") or "")
+                if goalie_id:
+                    write(goalie, goalie_id, team_id)
+            named = next((goalie for goalie in team.get("goalies") or [] if goalie.get("name")), None)
+            if named is not None and named.get("id"):
+                team["goalie_rank"] = named.get("rank") or ""
+                team["goalie_depth"] = named.get("depth")
+                team["goalie_starts"] = named.get("starts")
+                team["goalie_save_pct"] = named.get("save_pct_season") or ""
+                team["goalie_gaa"] = named.get("gaa") or ""
+                continue
+            if named is not None:
+                continue
+            probable = str(team.get("goalie_id") or "")
+            if not probable:
+                continue
+            rank, save_pct, gaa = goalie_rates(cards.get(f"card:{probable}"))
+            counted_row = counted.get(probable)
+            team["goalie_rank"] = rank
+            team["goalie_depth"] = (depths.get(team_id) or {}).get(probable)
+            team["goalie_starts"] = counted_row[1] if counted_row else None
+            team["goalie_save_pct"] = save_pct
+            team["goalie_gaa"] = gaa
 
     def _build(self, now: float, dates: str | None) -> dict[str, Any]:
         board = normalize_scoreboard(self._fetch(scoreboard_url(dates)))
@@ -835,6 +1105,10 @@ class LiveFeed:
             "final": sum(1 for g in games if g["state"] == "post"),
             "upcoming": sum(1 for g in games if g["state"] == "pre"),
         }
+        try:
+            self._annotate_goalies(board, now)
+        except Exception:  # noqa: BLE001 - rank is extra; the scoreboard still has to render
+            pass
         return board
 
     def get(self, *, force: bool = False, dates: str | None = None) -> dict[str, Any]:

@@ -571,9 +571,22 @@ def test_dashboard_live_api():
         assert 'id="liveSort"' in html and 'data-sort="clock"' in html and 'id="liveCollapse"' in html
         script = urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
         assert "chiclet" in script
-        assert all(token in script for token in ('data-act="collapse"', 'data-act="drag"', "elapsed_sec", "eeehoc.order.", "netminder"))
+        assert all(
+            token in script
+            for token in (
+                'data-act="collapse"',
+                'data-act="drag"',
+                "elapsed_sec",
+                "eeehoc.order.",
+                "netminder",
+                "goalie_rank",
+                "goalie_depth",
+                "starterCaption",
+            )
+        )
         css = urllib.request.urlopen(base + "/static/app.css", timeout=5).read().decode()
         assert ".rink .netminder" in css
+        assert ".rink .netminder.meta" in css
         assert urllib.request.urlopen(base + "/health", timeout=5).read() == b"ok\n"
 
         try:
@@ -610,3 +623,307 @@ def test_dashboard_live_outage_is_502():
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_rank_label_depth_and_season_starts():
+    from eeehoc.live import depth_by_starts, goalie_rates, rank_label, roster_goalies, season_starts
+
+    assert rank_label("8th", 8) == "#8"
+    assert rank_label("Tied-1st", 1) == "T1"
+    assert rank_label("Tied-2nd", None) == "T2"
+    assert rank_label("", None) == ""
+    assert rank_label("14th", "14") == "#14"
+
+    assert goalie_rates(
+        {
+            "athlete": {
+                "statsSummary": {
+                    "statistics": [
+                        {"name": "savePct", "displayValue": ".932", "rank": 8, "rankDisplayValue": "8th"},
+                        {"name": "avgGoalsAgainst", "displayValue": "1.98", "rank": 14, "rankDisplayValue": "14th"},
+                    ]
+                }
+            }
+        }
+    ) == ("#8", ".932", "1.98")
+    assert goalie_rates(None) == ("", "", "")
+    assert goalie_rates({"athlete": {}}) == ("", "", "")
+
+    stats = {
+        "categories": [
+            {
+                "names": ["games", "gameStarted", "wins"],
+                "statistics": [
+                    {"season": {"year": 2026}, "stats": ["10", "9", "4"]},
+                    {"season": {"year": 2027}, "stats": ["2", "2", "1"]},
+                    {"season": {"year": 2027}, "stats": ["3", "1", "1"]},
+                ],
+            }
+        ]
+    }
+    assert season_starts(stats, 2027) == (5, 3)
+    assert season_starts(stats, 2025) == (0, 0)
+    assert season_starts(None, 2027) is None
+    assert season_starts({"categories": []}, 2027) == (0, 0)
+
+    assert roster_goalies(
+        {
+            "athletes": [
+                {"position": "Centers", "items": [{"id": "9", "shortName": "N. Someone"}]},
+                {
+                    "position": "Goalies",
+                    "items": [
+                        {"id": "4392765", "shortName": "M. DiPietro"},
+                        {"id": "4712036", "displayName": "Jeremy Swayman"},
+                    ],
+                },
+            ]
+        }
+    ) == [
+        {"id": "4392765", "name": "M. DiPietro"},
+        {"id": "4712036", "name": "Jeremy Swayman"},
+    ]
+    assert depth_by_starts(
+        [
+            {"id": "sway", "name": "J. Swayman", "starts": 5, "games": 5},
+            {"id": "dip", "name": "M. DiPietro", "starts": 0, "games": 0},
+        ]
+    ) == {"sway": 1, "dip": 2}
+    # Same starts and games: name breaks the tie, so the chart is stable.
+    assert depth_by_starts(
+        [
+            {"id": "b", "name": "B", "starts": 3, "games": 4},
+            {"id": "a", "name": "A", "starts": 3, "games": 4},
+        ]
+    ) == {"a": 1, "b": 2}
+
+
+def _goalie_board():
+    return {
+        "leagues": [
+            {
+                "season": {
+                    "year": 2027,
+                    "displayName": "2026-27",
+                    "type": {"type": 2, "name": "Regular Season"},
+                }
+            }
+        ],
+        "events": [
+            {
+                "id": "1",
+                "date": "2026-10-11T23:00Z",
+                "shortName": "PHI @ BOS",
+                "competitions": [
+                    {
+                        "status": {
+                            "clock": 720,
+                            "displayClock": "12:00",
+                            "period": 2,
+                            "type": {"state": "in", "shortDetail": "2nd"},
+                        },
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "2",
+                                "team": {"id": "1", "abbreviation": "BOS", "shortDisplayName": "Bruins"},
+                                "records": [{"type": "ytd", "summary": "4-2-0"}],
+                            },
+                            {
+                                "homeAway": "away",
+                                "score": "1",
+                                "team": {"id": "15", "abbreviation": "PHI", "shortDisplayName": "Flyers"},
+                                "records": [{"type": "ytd", "summary": "0-4-2"}],
+                            },
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "2",
+                "date": "2026-10-12T23:00Z",
+                "shortName": "DAL @ COL",
+                "competitions": [
+                    {
+                        "status": {
+                            "clock": 0,
+                            "displayClock": "0:00",
+                            "period": 0,
+                            "type": {"state": "pre", "shortDetail": "7:00 PM"},
+                        },
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "0",
+                                "team": {"id": "17", "abbreviation": "COL"},
+                                "records": [{"type": "total", "summary": "3-1-0"}],
+                                "probables": [
+                                    {
+                                        "name": "probableStartingGoalie",
+                                        "athlete": {"id": "123", "shortName": "A. Georgiev"},
+                                    }
+                                ],
+                            },
+                            {"homeAway": "away", "score": "0", "team": {"id": "9", "abbreviation": "DAL"}},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def _counting(games, starts):
+    return {
+        "categories": [
+            {
+                "names": ["games", "gameStarted"],
+                "statistics": [{"season": {"year": 2027}, "stats": [str(games), str(starts)]}],
+            }
+        ]
+    }
+
+
+def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False):
+    summary = {
+        "boxscore": {
+            "teams": [],
+            "players": [
+                {
+                    "team": {"id": "1"},
+                    "statistics": [
+                        {
+                            "name": "goalies",
+                            "labels": ["SV", "TOI"],
+                            "athletes": [
+                                {"athlete": {"id": "4392765", "shortName": "M. DiPietro"}, "stats": ["4", "8:00"]},
+                                {"athlete": {"id": "4712036", "shortName": "J. Swayman"}, "stats": ["14", "32:00"]},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        "plays": [],
+    }
+
+    def fetch(url: str) -> dict:
+        calls.append(url)
+        if "scoreboard" in url:
+            return _goalie_board()
+        if "event=1" in url:
+            return summary
+        if url.endswith("/teams/1/roster"):
+            if roster_error:
+                raise RuntimeError("roster down")
+            return {
+                "athletes": [
+                    {
+                        "position": "Goalies",
+                        "items": [
+                            {"id": "4392765", "shortName": "M. DiPietro"},
+                            {"id": "4712036", "shortName": "J. Swayman"},
+                        ],
+                    }
+                ]
+            }
+        if url.endswith("/teams/17/roster"):
+            return {
+                "athletes": [
+                    {
+                        "position": "Goalies",
+                        "items": [
+                            {"id": "123", "shortName": "A. Georgiev"},
+                            {"id": "456", "shortName": "Z. Backup"},
+                        ],
+                    }
+                ]
+            }
+        if url.endswith("/athletes/4712036/stats"):
+            return _counting(5, 5)
+        if url.endswith("/athletes/4392765/stats"):
+            if backup_stats_error:
+                raise RuntimeError("stats down")
+            return {"categories": [{"names": ["games", "gameStarted"], "statistics": []}]}
+        if url.endswith("/athletes/123/stats"):
+            return _counting(4, 4)
+        if url.endswith("/athletes/456/stats"):
+            return _counting(1, 0)
+        if url.endswith("/athletes/4712036"):
+            return {
+                "athlete": {
+                    "statsSummary": {
+                        "statistics": [
+                            {"name": "savePct", "displayValue": ".932", "rank": 8, "rankDisplayValue": "8th"},
+                            {"name": "avgGoalsAgainst", "displayValue": "1.98", "rank": 14, "rankDisplayValue": "14th"},
+                        ]
+                    }
+                }
+            }
+        if url.endswith("/athletes/4392765"):
+            return {"athlete": {"statsSummary": {"statistics": []}}}
+        if url.endswith("/athletes/123"):
+            return {
+                "athlete": {
+                    "statsSummary": {
+                        "statistics": [
+                            {"name": "savePct", "displayValue": ".910", "rank": 1, "rankDisplayValue": "Tied-1st"}
+                        ]
+                    }
+                }
+            }
+        raise RuntimeError(url)
+
+    return fetch
+
+
+def test_live_feed_ranks_goalie_by_save_pct_and_starts():
+    from eeehoc.live import LiveFeed
+
+    calls: list[str] = []
+    feed = LiveFeed(_goalie_fetch(calls), ttl=100)
+    board = feed.get()
+    live = next(game for game in board["games"] if game["id"] == "1")
+    home = live["home"]
+    assert home["record"] == "4-2-0"
+    assert home["goalie_rank"] == "#8"
+    assert home["goalie_depth"] == 1
+    assert home["goalie_starts"] == 5
+    assert home["goalie_save_pct"] == ".932"
+    assert home["goalie_gaa"] == "1.98"
+    assert [goalie["name"] for goalie in home["goalies"]] == ["J. Swayman", "M. DiPietro"]
+    assert home["goalies"][0]["id"] == "4712036"
+    assert home["goalies"][0]["rank"] == "#8"
+    assert home["goalies"][0]["depth"] == 1
+    assert home["goalies"][0]["starts"] == 5
+    assert home["goalies"][1]["depth"] == 2
+    assert home["goalies"][1]["starts"] == 0
+    assert home["goalies"][1]["rank"] == ""
+    assert "goalie_rank" not in live["away"]
+
+    upcoming = next(game for game in board["games"] if game["id"] == "2")
+    assert upcoming["home"]["goalie"] == "A. Georgiev"
+    assert upcoming["home"]["record"] == "3-1-0"
+    assert upcoming["home"]["goalie_rank"] == "T1"
+    assert upcoming["home"]["goalie_depth"] == 1
+    assert upcoming["home"]["goalie_starts"] == 4
+
+    before = len(calls)
+    feed._boards[""] = (0.0, feed._boards[""][1])  # noqa: SLF001 - expire the scoreboard, keep goalie cards
+    feed.get()
+    again = calls[before:]
+    assert any("scoreboard" in url for url in again)
+    assert not any("athletes" in url or "roster" in url for url in again)
+
+
+def test_goalie_depth_is_omitted_when_the_chart_is_incomplete():
+    from eeehoc.live import LiveFeed
+
+    for kwargs in ({"roster_error": True}, {"backup_stats_error": True}):
+        feed = LiveFeed(_goalie_fetch([], **kwargs), ttl=100)
+        home = next(game for game in feed.get()["games"] if game["id"] == "1")["home"]
+        assert home["goalie_rank"] == "#8"
+        assert home["goalie_starts"] == 5
+        assert home["record"] == "4-2-0"
+        assert home["goalie_depth"] is None
+        assert home["goalies"][0]["depth"] is None
