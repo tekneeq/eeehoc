@@ -537,6 +537,12 @@ main {
   paint-order: stroke fill;
 }
 
+.rink .netminder.meta {
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  stroke-width: 1.35px;
+}
+
 .down-line {
   display: flex;
   align-items: center;
