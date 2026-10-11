@@ -231,18 +231,19 @@
     return (parts.length > 1 ? parts[parts.length - 1] : raw).replace(/\.$/, "");
   }
 
-  // League SV% rank, depth by starts, games started, and the club's record.
-  function goalieTags(rank, depth, starts, record) {
+  // League SV% rank with that save percentage, depth by starts, games started, and the club's record.
+  function goalieTags(rank, savePct, depth, starts, record) {
     const tags = [];
-    if (rank) tags.push(rank);
+    const ranked = [rank, savePct].filter(Boolean).join(" ");
+    if (ranked) tags.push(ranked);
     if (depth) tags.push(`D${depth}`);
     if (starts === 0 || Number.isFinite(starts)) tags.push(`${starts} GS`);
     if (record) tags.push(record);
     return tags;
   }
 
-  function rankLine(rank, depth, starts) {
-    return goalieTags(rank, depth, starts, "").join("  ");
+  function rankLine(rank, savePct, depth, starts) {
+    return goalieTags(rank, savePct, depth, starts, "").join("  ");
   }
 
   function metaSize(text) {
@@ -266,14 +267,14 @@
 
   function starterCaption(team) {
     const name = team.goalie || "TBD";
-    const tags = goalieTags(team.goalie_rank, team.goalie_depth, team.goalie_starts, team.record);
+    const tags = goalieTags(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts, team.record);
     return tags.length ? `${name} ${tags.join(" ")}` : name;
   }
 
   function rinkGoalie(team, x) {
     const name = netminder(team);
     if (!name) return "";
-    const meta = rankLine(team.goalie_rank, team.goalie_depth, team.goalie_starts);
+    const meta = rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts);
     const record = team.record || "";
     const extras = [meta, record].filter(Boolean);
     const color = teamColor(team);
@@ -302,7 +303,7 @@
     const awayG = netminder(game.away);
     const homeG = netminder(game.home);
     const caption = (team, name) =>
-      [team.abbr, name, rankLine(team.goalie_rank, team.goalie_depth, team.goalie_starts), team.record].filter(Boolean).join(" ");
+      [team.abbr, name, rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts), team.record].filter(Boolean).join(" ");
     const who = [awayG && caption(game.away, awayG), homeG && caption(game.home, homeG)].filter(Boolean).join(", ");
     return `
       <svg class="rink" viewBox="0 0 200 85" role="img" aria-label="Rink, last play${who ? `. Goalies ${esc(who)}` : ""}">
@@ -515,7 +516,7 @@
     if (!list || !list.length) return "";
     return list
       .map((g) => {
-        const tags = goalieTags(g.rank, g.depth, g.starts, team && team.record).join(" · ");
+        const tags = goalieTags(g.rank, g.save_pct_season, g.depth, g.starts, team && team.record).join(" · ");
         const bits = [tags, g.saves && `${g.saves} SV`, g.save_pct, g.goals_against !== "" && g.goals_against !== undefined ? `${g.goals_against} GA` : "", g.toi]
           .filter(Boolean)
           .join(" · ");
