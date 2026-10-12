@@ -246,11 +246,6 @@
     return goalieTags(rank, savePct, depth, starts, "").join("  ");
   }
 
-  function metaSize(text) {
-    const size = 56 / (Math.max(String(text).length, 1) * 0.62);
-    return Math.max(3.4, Math.min(4.5, size)).toFixed(2);
-  }
-
   function goalieTip(team, played) {
     const name = (played && played.name) || team.goalie || netminder(team);
     const bits = [name];
@@ -274,22 +269,33 @@
   function rinkGoalie(team, x) {
     const name = netminder(team);
     if (!name) return "";
-    const meta = rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts);
-    const record = team.record || "";
-    const extras = [meta, record].filter(Boolean);
+    const rank = [team.goalie_rank, team.goalie_save_pct].filter(Boolean).join("  ");
+    const detailBits = [];
+    if (team.goalie_depth) detailBits.push(`D${team.goalie_depth}`);
+    if (team.goalie_starts === 0 || Number.isFinite(team.goalie_starts)) detailBits.push(`${team.goalie_starts} GS`);
+    const stats = [rank, detailBits.join(" · "), team.record || ""].filter(Boolean);
     const color = teamColor(team);
-    const nameY = extras.length === 2 ? 31 : extras.length === 1 ? 37.5 : 42.5;
     const played = (team.goalies || []).find((g) => g && g.name);
-    const lines = [
-      `<text class="netminder" x="${x}" y="${nameY}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="6.6">${esc(name)}</text>`,
-    ];
-    extras.forEach((text, i) => {
-      const y = extras.length === 2 ? (i === 0 ? 40.2 : 47.8) : 46.2;
-      lines.push(
-        `<text class="netminder meta" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="${metaSize(text)}">${esc(text)}</text>`
-      );
-    });
-    return `<g>${lines.join("")}<title>${esc(goalieTip(team, played))}</title></g>`;
+    const nameY = stats.length ? 28 : 42.5;
+    const rowH = 9.6;
+    const firstStatY = 40;
+    const lastY = stats.length ? firstStatY + (stats.length - 1) * rowH : nameY;
+    const plateTop = stats.length ? 20 : 34;
+    const plateBottom = stats.length ? Math.min(66, lastY + 5.5) : 51;
+    const plateW = 60;
+    const statText = stats
+      .map((text, i) => {
+        const y = (firstStatY + i * rowH).toFixed(1);
+        return `<text class="netminder meta" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle">${esc(text)}</text>`;
+      })
+      .join("");
+    const nameClass = name.length > 10 ? "netminder long" : "netminder";
+    return `<g class="net-card">
+      <rect class="net-plate" x="${(x - plateW / 2).toFixed(1)}" y="${plateTop}" width="${plateW}" height="${(plateBottom - plateTop).toFixed(1)}" rx="3.4" stroke="${color}"/>
+      <text class="${nameClass}" x="${x}" y="${nameY}" text-anchor="middle" dominant-baseline="middle">${esc(name)}</text>
+      ${statText}
+      <title>${esc(goalieTip(team, played))}</title>
+    </g>`;
   }
 
   function rinkSvg(game) {
