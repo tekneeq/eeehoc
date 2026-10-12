@@ -537,19 +537,19 @@ main {
 .rink .netminder {
   font-family: var(--mono);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 7.6px;
   fill: #f4fbff;
   letter-spacing: 0.01em;
   stroke: none;
 }
 
 .rink .netminder.long {
-  font-size: 11px;
+  font-size: 6.4px;
 }
 
 .rink .netminder.meta {
   font-weight: 700;
-  font-size: 12px;
+  font-size: 6.6px;
   letter-spacing: 0.01em;
   fill: #f7fbff;
 }

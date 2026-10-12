@@ -327,9 +327,9 @@
         <circle class="faceoff" cx="131" cy="63" r="1" />
         <path class="crease" d="M11 34 v17 a8 8 0 0 0 0 -17 z" />
         <path class="crease" d="M189 34 v17 a8 8 0 0 1 0 -17 z" />
+        ${puck}
         ${rinkGoalie(game.away, 43)}
         ${rinkGoalie(game.home, 157)}
-        ${puck}
       </svg>`;
   }
 
