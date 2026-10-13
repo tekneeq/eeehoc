@@ -576,6 +576,8 @@ def test_dashboard_live_api():
             for token in (
                 'data-act="collapse"',
                 'data-act="drag"',
+                "pointerdown",
+                "setPointerCapture",
                 "elapsed_sec",
                 "eeehoc.order.",
                 "netminder",
@@ -588,6 +590,8 @@ def test_dashboard_live_api():
         css = urllib.request.urlopen(base + "/static/app.css", timeout=5).read().decode()
         assert ".rink .netminder" in css
         assert ".rink .netminder.meta" in css
+        assert ".chiclet.dragging" in css and ".chiclet.collapsed" in css
+        assert "dragstart" not in script  # pointer events drive the reorder, not HTML5 DnD
         assert urllib.request.urlopen(base + "/health", timeout=5).read() == b"ok\n"
 
         try:
