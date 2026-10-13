@@ -995,6 +995,13 @@
     renderLive({ animate: true });
   }
 
+  function updateSortChips() {
+    document.querySelectorAll("#liveSort .chip").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.sort === state.sort);
+      if (chip.dataset.sort === "custom") chip.disabled = !state.order.length;
+    });
+  }
+
   function updateCollapseAllLabel() {
     const games = visibleGames();
     const allCollapsed = games.length > 0 && games.every((g) => state.collapsed.has(g.id));
@@ -1129,9 +1136,13 @@
         grid.classList.remove("dragging");
         document.body.classList.remove("chiclet-dragging");
         state.dragId = null;
-        if (commit) adoptOrder([...grid.querySelectorAll(".chiclet")].map((c) => c.dataset.id));
+        if (commit) {
+          // The grid already shows the new order; only the "Mine" chip needs to catch up.
+          adoptOrder([...grid.querySelectorAll(".chiclet")].map((c) => c.dataset.id));
+          updateSortChips();
+        }
         // The live poll held off while the card was in hand; draw it now.
-        if (commit || state.renderPending) renderLive();
+        if (state.renderPending) renderLive();
       }
       dragging = false;
       scrolling = false;
@@ -1250,10 +1261,7 @@
     document.querySelectorAll("#liveFilter .chip").forEach((chip) => {
       chip.classList.toggle("active", chip.dataset.state === state.filter);
     });
-    document.querySelectorAll("#liveSort .chip").forEach((chip) => {
-      chip.classList.toggle("active", chip.dataset.sort === state.sort);
-      if (chip.dataset.sort === "custom") chip.disabled = !state.order.length;
-    });
+    updateSortChips();
 
     const games = visibleGames();
     updateCollapseAllLabel();
