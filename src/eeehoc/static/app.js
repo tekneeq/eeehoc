@@ -385,22 +385,35 @@
     return `<span class="status pre">${esc(fmtKickoff(game.date))}</span>`;
   }
 
+  function scoringLines(game, side) {
+    const goals = (game.goals || []).filter((g) => g.side === side && (g.when || g.scorer));
+    if (!goals.length) return "";
+    return `<span class="scorers">${goals
+      .map((g) => {
+        const tag = g.tag ? `<small>${esc(g.tag)}</small>` : "";
+        return `<span class="scorer" title="${esc(g.text || "")}"><b>${esc(g.when || "")}</b>${esc(g.scorer || "")}${tag}</span>`;
+      })
+      .join("")}</span>`;
+  }
+
   function teamRow(game, side) {
     const t = game[side];
     const onPp = game.situation?.power_play === side;
     const loser = game.state === "post" && !t.winner && game.home.score !== game.away.score;
+    const scored = scoringLines(game, side);
     const logo =
       t.logo && String(t.logo).startsWith("https://")
         ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" />`
         : `<span class="logo logo-fallback">${esc(t.abbr.slice(0, 2))}</span>`;
     return `
-      <div class="team-row ${side} ${onPp ? "on-pp" : ""} ${t.winner ? "winner" : ""} ${loser ? "loser" : ""}"
+      <div class="team-row ${side} ${onPp ? "on-pp" : ""} ${t.winner ? "winner" : ""} ${loser ? "loser" : ""} ${scored ? "has-goals" : ""}"
            style="--team:${teamColor(t)}">
         ${logo}
         <span class="tname">
           <b>${esc(t.abbr)}</b>
           <span class="full">${esc(t.name)}</span>
           ${t.record ? `<small class="rec">${esc(t.record)}</small>` : ""}
+          ${scored}
         </span>
         ${onPp ? `<span class="pp-pill">PP</span>` : "<span></span>"}
         <span class="tscore">${game.state === "pre" ? "" : t.score}</span>
