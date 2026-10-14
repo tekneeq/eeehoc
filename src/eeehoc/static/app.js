@@ -1015,7 +1015,20 @@
     ids.splice(from, 1);
     ids.splice(to, 0, id);
     adoptOrder(ids);
-    renderLive();
+    renderLive({ animate: true });
+  }
+
+  function updateSortChips() {
+    document.querySelectorAll("#liveSort .chip").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.sort === state.sort);
+      if (chip.dataset.sort === "custom") chip.disabled = !state.order.length;
+    });
+  }
+
+  function updateCollapseAllLabel() {
+    const games = visibleGames();
+    const allCollapsed = games.length > 0 && games.every((g) => state.collapsed.has(g.id));
+    $("#liveCollapse").textContent = allCollapsed ? "Expand all" : "Collapse all";
   }
 
   function toggleCollapsed(id, force) {
@@ -1036,43 +1049,182 @@
     return getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
   }
 
-  function onDragStart(ev) {
-    const handle = ev.target.closest("[data-act='drag']");
-    const card = handle?.closest(".chiclet");
-    if (!card) {
-      ev.preventDefault();
-      return;
+  // Slide the other cards from where they were to where they are now, so a
+  // reorder reads as movement rather than a jump.
+  function animateShuffle(cards, before) {
+    if (typeof Element.prototype.animate !== "function") return;
+    for (const card of cards) {
+      const was = before.get(card);
+      if (!was) continue;
+      const now = card.getBoundingClientRect();
+      const dx = was.left - now.left;
+      const dy = was.top - now.top;
+      if (!dx && !dy) continue;
+      card.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }], {
+        duration: 170,
+        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      });
     }
-    state.dragId = card.dataset.id;
-    card.classList.add("dragging");
-    ev.dataTransfer.effectAllowed = "move";
-    ev.dataTransfer.setData("text/plain", state.dragId);
-    ev.dataTransfer.setDragImage(card, 24, 24);
   }
 
-  function onDragOver(ev) {
-    if (!state.dragId) return;
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = "move";
-    const grid = $("#liveGrid");
-    const over = ev.target.closest(".chiclet");
-    const dragged = grid.querySelector(`.chiclet[data-id="${CSS.escape(state.dragId)}"]`);
-    if (!over || !dragged || over === dragged) return;
+  // Put the dragged card where the pointer is. The grid wraps, so the slot is
+  // chosen by the card under the pointer (or the nearest one when the pointer
+  // sits in a gap), splitting that card left/right in a multi-column layout and
+  // top/bottom when the chiclets stack in one column.
+  function placeCardAt(grid, card, clientX, clientY) {
+    const others = [...grid.querySelectorAll(".chiclet")].filter((el) => el !== card);
+    if (!others.length) return;
+    let over = null;
+    let best = Infinity;
+    for (const el of others) {
+      const r = el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        over = el;
+        break;
+      }
+      const cx = Math.max(r.left, Math.min(clientX, r.right));
+      const cy = Math.max(r.top, Math.min(clientY, r.bottom));
+      const d = Math.hypot(clientX - cx, clientY - cy);
+      if (d < best) {
+        best = d;
+        over = el;
+      }
+    }
+    if (!over) return;
     const rect = over.getBoundingClientRect();
     const before =
-      gridColumns(grid) > 1 ? ev.clientX < rect.left + rect.width / 2 : ev.clientY < rect.top + rect.height / 2;
+      gridColumns(grid) > 1 ? clientX < rect.left + rect.width / 2 : clientY < rect.top + rect.height / 2;
     const target = before ? over : over.nextElementSibling;
-    if (target !== dragged && target !== dragged.nextElementSibling) grid.insertBefore(dragged, target);
+    if (target === card || target === card.nextElementSibling) return;
+    const was = new Map(others.map((el) => [el, el.getBoundingClientRect()]));
+    grid.insertBefore(card, target);
+    animateShuffle(others, was);
   }
 
-  function onDragEnd() {
-    const grid = $("#liveGrid");
-    const dragged = grid.querySelector(".chiclet.dragging");
-    dragged?.classList.remove("dragging");
-    if (!state.dragId) return;
-    state.dragId = null;
-    adoptOrder([...grid.querySelectorAll(".chiclet")].map((c) => c.dataset.id));
-    renderLive();
+  // Pointer drag on the ⠿ grip, the way eeesoc moves its chiclets. HTML5 drag
+  // and drop never fires on touch and Chromium cancels it the moment the drag
+  // source is moved in the DOM, so the card snapped back. A mouse starts the
+  // drag after a few pixels; a finger has to hold the grip first, and moving
+  // before the hold scrolls the page instead (the grip blocks native panning).
+  function bindChicletDrag(grid) {
+    const MOVE_PX = 6;
+    const TOUCH_HOLD_MS = 400;
+    let pointerId = null;
+    let handle = null;
+    let card = null;
+    let originX = 0;
+    let originY = 0;
+    let lastY = 0;
+    let dragging = false;
+    let scrolling = false;
+    let holdTimer = null;
+    let pointerType = "mouse";
+
+    const clearHold = () => {
+      if (holdTimer) clearTimeout(holdTimer);
+      holdTimer = null;
+    };
+
+    const scrollPage = (dy) => {
+      if (!dy) return;
+      (document.scrollingElement || document.documentElement).scrollBy(0, dy);
+    };
+
+    const startDrag = () => {
+      if (dragging || scrolling || pointerId === null || !card) return;
+      dragging = true;
+      state.dragId = card.dataset.id;
+      card.classList.add("dragging");
+      grid.classList.add("dragging");
+      document.body.classList.add("chiclet-dragging");
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch {
+        /* capture is optional — the window listeners still finish the gesture */
+      }
+    };
+
+    const stopDrag = (commit) => {
+      clearHold();
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (dragging) {
+        try {
+          handle.releasePointerCapture(pointerId);
+        } catch {
+          /* already released */
+        }
+        card.classList.remove("dragging");
+        grid.classList.remove("dragging");
+        document.body.classList.remove("chiclet-dragging");
+        state.dragId = null;
+        if (commit) {
+          // The grid already shows the new order; only the "Mine" chip needs to catch up.
+          adoptOrder([...grid.querySelectorAll(".chiclet")].map((c) => c.dataset.id));
+          updateSortChips();
+        }
+        // The live poll held off while the card was in hand; draw it now.
+        if (state.renderPending) renderLive();
+      }
+      dragging = false;
+      scrolling = false;
+      pointerId = null;
+      handle = null;
+      card = null;
+    };
+
+    const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      if (scrolling) {
+        scrollPage(lastY - ev.clientY);
+        lastY = ev.clientY;
+        return;
+      }
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - originX, ev.clientY - originY) < MOVE_PX) return;
+        if (pointerType !== "mouse") {
+          clearHold();
+          scrolling = true;
+          scrollPage(lastY - ev.clientY);
+          lastY = ev.clientY;
+          return;
+        }
+        startDrag();
+      }
+      ev.preventDefault();
+      const edge = 56;
+      if (ev.clientY < edge) scrollPage(-20);
+      else if (ev.clientY > window.innerHeight - edge) scrollPage(20);
+      placeCardAt(grid, card, ev.clientX, ev.clientY);
+    };
+
+    const onUp = (ev) => {
+      if (pointerId !== null && ev.pointerId !== pointerId) return;
+      stopDrag(dragging);
+    };
+
+    grid.addEventListener("pointerdown", (ev) => {
+      if (ev.isPrimary === false) return;
+      if (ev.pointerType === "mouse" && ev.button !== 0) return;
+      const grip = ev.target.closest("[data-act='drag']");
+      const owner = grip?.closest(".chiclet");
+      if (!grip || !owner || pointerId !== null) return;
+      ev.preventDefault();
+      handle = grip;
+      card = owner;
+      pointerType = ev.pointerType || "mouse";
+      pointerId = ev.pointerId;
+      originX = ev.clientX;
+      originY = ev.clientY;
+      lastY = ev.clientY;
+      dragging = false;
+      scrolling = false;
+      window.addEventListener("pointermove", onMove, { passive: false });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      if (pointerType !== "mouse") holdTimer = setTimeout(startDrag, TOUCH_HOLD_MS);
+    });
   }
 
   function chicletTools(game, collapsed) {
@@ -1080,18 +1232,22 @@
       <span class="chiclet-tools">
         <button type="button" class="tool" data-act="up" title="Move up">▲</button>
         <button type="button" class="tool" data-act="down" title="Move down">▼</button>
-        <span class="tool handle" data-act="drag" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</span>
+        <span class="tool handle" data-act="drag" title="Drag to reorder" aria-label="Drag to reorder">⠿</span>
         <button type="button" class="tool" data-act="collapse" title="${collapsed ? "Expand" : "Collapse"}" aria-expanded="${!collapsed}">${collapsed ? "▸" : "▾"}</button>
       </span>`;
   }
 
-  function renderLive() {
+  function renderLive(opts = {}) {
     if (state.dragId) {
       state.renderPending = true;
       return;
     }
     state.renderPending = false;
     const grid = $("#liveGrid");
+    const before = new Map();
+    if (opts.animate) {
+      grid.querySelectorAll(".chiclet").forEach((c) => before.set(c.dataset.id, c.getBoundingClientRect()));
+    }
     const meta = $("#liveMeta");
     const badge = $("#liveBadge");
     const board = state.board;
@@ -1128,19 +1284,19 @@
     document.querySelectorAll("#liveFilter .chip").forEach((chip) => {
       chip.classList.toggle("active", chip.dataset.state === state.filter);
     });
-    document.querySelectorAll("#liveSort .chip").forEach((chip) => {
-      chip.classList.toggle("active", chip.dataset.sort === state.sort);
-      if (chip.dataset.sort === "custom") chip.disabled = !state.order.length;
-    });
+    updateSortChips();
 
     const games = visibleGames();
-    const allCollapsed = games.length > 0 && games.every((g) => state.collapsed.has(g.id));
-    $("#liveCollapse").textContent = allCollapsed ? "Expand all" : "Collapse all";
+    updateCollapseAllLabel();
     if (!games.length) {
       grid.innerHTML = `<p class="lede">No games in this view.</p>`;
       return;
     }
     grid.innerHTML = games.map(chicletHtml).join("");
+    if (before.size) {
+      const cards = [...grid.querySelectorAll(".chiclet")];
+      animateShuffle(cards, new Map(cards.map((c) => [c, before.get(c.dataset.id)])));
+    }
     loadVisibleForms();
   }
 
@@ -1157,8 +1313,14 @@
       return;
     }
     if (act === "collapse") {
+      // Swap just this card so the rest of the board does not flicker.
       toggleCollapsed(id);
-      renderLive(); // the "Collapse all" label depends on every card
+      const was = new Map();
+      const grid = $("#liveGrid");
+      grid.querySelectorAll(".chiclet").forEach((c) => c !== card && was.set(c, c.getBoundingClientRect()));
+      card.outerHTML = chicletHtml(game);
+      animateShuffle([...was.keys()], was);
+      updateCollapseAllLabel();
       return;
     }
     if (act === "toggle") {
@@ -1480,10 +1642,7 @@
   $("#liveCollapse").addEventListener("click", collapseAll);
   const liveGrid = $("#liveGrid");
   liveGrid.addEventListener("click", onGridClick);
-  liveGrid.addEventListener("dragstart", onDragStart);
-  liveGrid.addEventListener("dragover", onDragOver);
-  liveGrid.addEventListener("drop", (ev) => ev.preventDefault());
-  liveGrid.addEventListener("dragend", onDragEnd);
+  bindChicletDrag(liveGrid);
 
   loadPrefs();
   loadLive();
