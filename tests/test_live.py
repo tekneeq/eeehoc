@@ -590,6 +590,7 @@ def test_dashboard_live_api():
         assert ".rink .netminder" in css
         assert ".team-row .scorers" in css
         assert ".rink .netminder.meta" in css
+        assert ".rink .net-plate" in css
         assert urllib.request.urlopen(base + "/health", timeout=5).read() == b"ok\n"
 
         try:

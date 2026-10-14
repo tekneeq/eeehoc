@@ -573,19 +573,30 @@ main {
   stroke-width: 0.45;
 }
 
+.rink .net-plate {
+  fill: #07141c;
+  fill-opacity: 0.94;
+  stroke-width: 0.9;
+}
+
 .rink .netminder {
   font-family: var(--mono);
   font-weight: 700;
+  font-size: 7.6px;
+  fill: #f4fbff;
   letter-spacing: 0.01em;
-  stroke: #0c1c28;
-  stroke-width: 2.5px;
-  paint-order: stroke fill;
+  stroke: none;
+}
+
+.rink .netminder.long {
+  font-size: 6.4px;
 }
 
 .rink .netminder.meta {
-  font-weight: 650;
-  letter-spacing: 0.03em;
-  stroke-width: 1.35px;
+  font-weight: 700;
+  font-size: 6.6px;
+  letter-spacing: 0.01em;
+  fill: #f7fbff;
 }
 
 .down-line {
