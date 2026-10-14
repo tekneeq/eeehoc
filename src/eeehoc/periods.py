@@ -1,4 +1,4 @@
-"""First-period score distribution: regular season and the past 30 days.
+"""First-period score distribution: regular season, the past 30 days, and today.
 
 ESPN's month scoreboard (``dates=YYYYMM``) carries every game's period lines.
 A game counts once the 1st period is over. Scorelines are unordered, so 2-1
@@ -156,6 +156,16 @@ def _iter_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _slate_size(payload: dict[str, Any], day: date) -> int:
+    """How many games are on a day's slate, whatever state they are in."""
+    total = 0
+    for event in payload.get("events") or []:
+        comp = (event.get("competitions") or [{}])[0]
+        if _game_day(str(event.get("date") or comp.get("date") or "")) == day:
+            total += 1
+    return total
+
+
 def _shares(games: list[dict[str, Any]]) -> list[dict[str, Any]]:
     counts = Counter(game["bucket"] for game in games)
     total = sum(counts[key] for key, _, _ in BUCKETS)
@@ -208,8 +218,9 @@ def build_distribution(
     season_year: int,
     season_label: str,
     season_start: date | None,
+    slate_size: int | None = None,
 ) -> dict[str, Any]:
-    """Split completed 1st periods into the regular season and the last 30 days."""
+    """Split completed 1st periods into the regular season, the last 30 days, and today."""
     recent_start = today - timedelta(days=RECENT_DAYS - 1)
     seen: set[str] = set()
     unique: list[dict[str, Any]] = []
@@ -235,7 +246,10 @@ def build_distribution(
         for game in unique
         if game["day"] >= recent_start and game["season_type"] in (PRESEASON_TYPE, REGULAR_TYPE, PLAYOFF_TYPE)
     ]
+    today_games = [game for game in unique if game["day"] == today]
     label = season_label or (f"{season_year - 1}-{str(season_year)[-2:]}" if season_year else "Season")
+    today_window = _window(today_games, label="Today", detail=_today_detail(len(today_games), slate_size))
+    today_window["scheduled"] = slate_size if slate_size is not None else len(today_games)
     return {
         "season_label": label,
         "season_year": season_year,
@@ -243,7 +257,18 @@ def build_distribution(
         "days": RECENT_DAYS,
         "season": _window(season_games, label="Season", detail=f"{label} regular season"),
         "recent": _window(recent_games, label="Past 30 days", detail=_recent_detail(recent_games)),
+        "today": today_window,
     }
+
+
+def _today_detail(done: int, slate_size: int | None) -> str:
+    if slate_size is None or slate_size <= done:
+        slate_size = done
+    if not slate_size:
+        return "No games today"
+    if not done:
+        return f"none of {slate_size} past the 1st yet"
+    return f"{done} of {slate_size} past the 1st"
 
 
 def _recent_detail(games: list[dict[str, Any]]) -> str:
@@ -352,6 +377,7 @@ class PeriodFeed:
             season_year=year,
             season_label=label,
             season_start=start,
+            slate_size=_slate_size(current, today),
         )
         result["fetched_at"] = int(now)
         self._last_error = None

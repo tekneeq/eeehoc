@@ -88,6 +88,7 @@
     }
     const season = board.season || {};
     const recent = board.recent || {};
+    const today = board.today || {};
     const buckets = season.buckets || recent.buckets || [];
     if (!buckets.length) {
       grid.innerHTML = `<p class="p1-loading">No completed 1st periods yet.</p>`;
@@ -99,16 +100,19 @@
     legend.innerHTML = `
       <span><i class="p1-swatch season"></i><b>Season</b> ${esc(season.detail || "")} · ${esc(seasonMix)}</span>
       <span><i class="p1-swatch recent"></i><b>Past 30 days</b> ${esc(fmtMix(recent.mix) || recent.detail || "")} · ${esc(recentMix)}</span>
+      <span><i class="p1-swatch today"></i><b>Today</b> ${esc(today.detail || "No games today")}</span>
     `;
     if (board.stale) note.textContent = "How the first period ends. Showing the last saved sample.";
     grid.innerHTML = buckets
       .map((bucket, index) => {
         const recentBucket = (recent.buckets || [])[index] || bucket;
+        const todayBucket = (today.buckets || [])[index] || { count: 0, pct: 0 };
         return `
           <article class="p1-cell">
             <h3 class="p1-score">${esc(bucket.name || bucket.label)}</h3>
             ${metricHtml(season, bucket, "season")}
             ${metricHtml(recent, recentBucket, "recent")}
+            ${metricHtml(today, todayBucket, "today")}
           </article>`;
       })
       .join("");

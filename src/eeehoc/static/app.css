@@ -1303,6 +1303,10 @@ main {
   background: var(--ice);
 }
 
+.p1-swatch.today {
+  background: var(--warn);
+}
+
 .p1-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1347,6 +1351,10 @@ main {
   color: var(--ice);
 }
 
+.p1-metric.today .p1-pct {
+  color: var(--warn);
+}
+
 .p1-count {
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -1369,6 +1377,10 @@ main {
 
 .p1-metric.recent .p1-bar span {
   background: var(--ice);
+}
+
+.p1-metric.today .p1-bar span {
+  background: var(--warn);
 }
 
 /* --------------------------------------------------------------- WinProb */
