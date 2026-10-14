@@ -135,6 +135,32 @@ def test_distribution_splits_regular_season_and_past_30_days():
     assert "preseason" in board["recent"]["detail"]
 
 
+def test_today_counts_only_games_past_the_first_period():
+    """Three games on the slate; the one still in the 1st waits."""
+    board = PeriodFeed(lambda url: _payload(EVENTS)).get(today=TODAY)
+    today = board["today"]
+    rows = {row["id"]: row for row in today["buckets"]}
+    assert today["games"] == 2
+    assert today["scheduled"] == 3
+    assert today["detail"] == "2 of 3 past the 1st"
+    assert rows["1"]["count"] == 1 and rows["1"]["pct"] == 50
+    assert rows["1-1"]["count"] == 1 and rows["1-1"]["pct"] == 50
+    assert rows["0"]["count"] == 0 and rows["0"]["pct"] == 0
+    assert sum(row["pct"] for row in today["buckets"]) == 100
+
+
+def test_today_before_any_first_period_ends():
+    quiet = [_event("later", "2026-10-01T23:30Z", 0, 0, state="pre", period=0, status_name="STATUS_SCHEDULED", detail="7:30 PM")]
+    board = PeriodFeed(lambda url: _payload(quiet)).get(today=TODAY)
+    assert board["today"]["games"] == 0
+    assert board["today"]["scheduled"] == 1
+    assert board["today"]["detail"] == "none of 1 past the 1st yet"
+    assert all(row["pct"] == 0 for row in board["today"]["buckets"])
+
+    empty = PeriodFeed(lambda url: _payload([])).get(today=TODAY)
+    assert empty["today"]["detail"] == "No games today"
+
+
 def test_month_header_does_not_replace_the_live_season():
     """September's scoreboard still advertises 2025-26. Season stats follow the live slate."""
     urls: list[str] = []
@@ -176,12 +202,15 @@ def test_distribution_endpoint_and_page_shell():
             "2-1",
             "3+ goals",
         ]
+        assert board["today"]["label"] == "Today" and "scheduled" in board["today"]
         html = urllib.request.urlopen(base + "/", timeout=5).read().decode()
         assert 'id="p1Board"' in html
         script = urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
         assert "/api/periods" in script
+        assert 'metricHtml(today, todayBucket, "today")' in script
         css = urllib.request.urlopen(base + "/static/app.css", timeout=5).read().decode()
         assert ".p1-grid" in css
+        assert ".p1-metric.today .p1-pct" in css
     finally:
         httpd.shutdown()
         httpd.server_close()

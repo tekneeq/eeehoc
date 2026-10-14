@@ -88,6 +88,7 @@
     }
     const season = board.season || {};
     const recent = board.recent || {};
+    const today = board.today || {};
     const buckets = season.buckets || recent.buckets || [];
     if (!buckets.length) {
       grid.innerHTML = `<p class="p1-loading">No completed 1st periods yet.</p>`;
@@ -99,16 +100,19 @@
     legend.innerHTML = `
       <span><i class="p1-swatch season"></i><b>Season</b> ${esc(season.detail || "")} · ${esc(seasonMix)}</span>
       <span><i class="p1-swatch recent"></i><b>Past 30 days</b> ${esc(fmtMix(recent.mix) || recent.detail || "")} · ${esc(recentMix)}</span>
+      <span><i class="p1-swatch today"></i><b>Today</b> ${esc(today.detail || "No games today")}</span>
     `;
     if (board.stale) note.textContent = "How the first period ends. Showing the last saved sample.";
     grid.innerHTML = buckets
       .map((bucket, index) => {
         const recentBucket = (recent.buckets || [])[index] || bucket;
+        const todayBucket = (today.buckets || [])[index] || { count: 0, pct: 0 };
         return `
           <article class="p1-cell">
             <h3 class="p1-score">${esc(bucket.name || bucket.label)}</h3>
             ${metricHtml(season, bucket, "season")}
             ${metricHtml(recent, recentBucket, "recent")}
+            ${metricHtml(today, todayBucket, "today")}
           </article>`;
       })
       .join("");
@@ -246,11 +250,6 @@
     return goalieTags(rank, savePct, depth, starts, "").join("  ");
   }
 
-  function metaSize(text) {
-    const size = 56 / (Math.max(String(text).length, 1) * 0.62);
-    return Math.max(3.4, Math.min(4.5, size)).toFixed(2);
-  }
-
   function goalieTip(team, played) {
     const name = (played && played.name) || team.goalie || netminder(team);
     const bits = [name];
@@ -274,22 +273,33 @@
   function rinkGoalie(team, x) {
     const name = netminder(team);
     if (!name) return "";
-    const meta = rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts);
-    const record = team.record || "";
-    const extras = [meta, record].filter(Boolean);
+    const rank = [team.goalie_rank, team.goalie_save_pct].filter(Boolean).join("  ");
+    const detailBits = [];
+    if (team.goalie_depth) detailBits.push(`D${team.goalie_depth}`);
+    if (team.goalie_starts === 0 || Number.isFinite(team.goalie_starts)) detailBits.push(`${team.goalie_starts} GS`);
+    const stats = [rank, detailBits.join(" · "), team.record || ""].filter(Boolean);
     const color = teamColor(team);
-    const nameY = extras.length === 2 ? 31 : extras.length === 1 ? 37.5 : 42.5;
     const played = (team.goalies || []).find((g) => g && g.name);
-    const lines = [
-      `<text class="netminder" x="${x}" y="${nameY}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="6.6">${esc(name)}</text>`,
-    ];
-    extras.forEach((text, i) => {
-      const y = extras.length === 2 ? (i === 0 ? 40.2 : 47.8) : 46.2;
-      lines.push(
-        `<text class="netminder meta" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="${metaSize(text)}">${esc(text)}</text>`
-      );
-    });
-    return `<g>${lines.join("")}<title>${esc(goalieTip(team, played))}</title></g>`;
+    const nameY = stats.length ? 28 : 42.5;
+    const rowH = 9.6;
+    const firstStatY = 40;
+    const lastY = stats.length ? firstStatY + (stats.length - 1) * rowH : nameY;
+    const plateTop = stats.length ? 20 : 34;
+    const plateBottom = stats.length ? Math.min(66, lastY + 5.5) : 51;
+    const plateW = 60;
+    const statText = stats
+      .map((text, i) => {
+        const y = (firstStatY + i * rowH).toFixed(1);
+        return `<text class="netminder meta" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle">${esc(text)}</text>`;
+      })
+      .join("");
+    const nameClass = name.length > 10 ? "netminder long" : "netminder";
+    return `<g class="net-card">
+      <rect class="net-plate" x="${(x - plateW / 2).toFixed(1)}" y="${plateTop}" width="${plateW}" height="${(plateBottom - plateTop).toFixed(1)}" rx="3.4" stroke="${color}"/>
+      <text class="${nameClass}" x="${x}" y="${nameY}" text-anchor="middle" dominant-baseline="middle">${esc(name)}</text>
+      ${statText}
+      <title>${esc(goalieTip(team, played))}</title>
+    </g>`;
   }
 
   function rinkSvg(game) {
@@ -321,9 +331,9 @@
         <circle class="faceoff" cx="131" cy="63" r="1" />
         <path class="crease" d="M11 34 v17 a8 8 0 0 0 0 -17 z" />
         <path class="crease" d="M189 34 v17 a8 8 0 0 1 0 -17 z" />
+        ${puck}
         ${rinkGoalie(game.away, 43)}
         ${rinkGoalie(game.home, 157)}
-        ${puck}
       </svg>`;
   }
 
@@ -385,22 +395,35 @@
     return `<span class="status pre">${esc(fmtKickoff(game.date))}</span>`;
   }
 
+  function scoringLines(game, side) {
+    const goals = (game.goals || []).filter((g) => g.side === side && (g.when || g.scorer));
+    if (!goals.length) return "";
+    return `<span class="scorers">${goals
+      .map((g) => {
+        const tag = g.tag ? `<small>${esc(g.tag)}</small>` : "";
+        return `<span class="scorer" title="${esc(g.text || "")}"><b>${esc(g.when || "")}</b>${esc(g.scorer || "")}${tag}</span>`;
+      })
+      .join("")}</span>`;
+  }
+
   function teamRow(game, side) {
     const t = game[side];
     const onPp = game.situation?.power_play === side;
     const loser = game.state === "post" && !t.winner && game.home.score !== game.away.score;
+    const scored = scoringLines(game, side);
     const logo =
       t.logo && String(t.logo).startsWith("https://")
         ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" />`
         : `<span class="logo logo-fallback">${esc(t.abbr.slice(0, 2))}</span>`;
     return `
-      <div class="team-row ${side} ${onPp ? "on-pp" : ""} ${t.winner ? "winner" : ""} ${loser ? "loser" : ""}"
+      <div class="team-row ${side} ${onPp ? "on-pp" : ""} ${t.winner ? "winner" : ""} ${loser ? "loser" : ""} ${scored ? "has-goals" : ""}"
            style="--team:${teamColor(t)}">
         ${logo}
         <span class="tname">
           <b>${esc(t.abbr)}</b>
           <span class="full">${esc(t.name)}</span>
           ${t.record ? `<small class="rec">${esc(t.record)}</small>` : ""}
+          ${scored}
         </span>
         ${onPp ? `<span class="pp-pill">PP</span>` : "<span></span>"}
         <span class="tscore">${game.state === "pre" ? "" : t.score}</span>

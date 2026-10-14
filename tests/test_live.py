@@ -585,11 +585,14 @@ def test_dashboard_live_api():
                 "goalie_save_pct",
                 "goalie_depth",
                 "starterCaption",
+                "scoringLines",
             )
         )
         css = urllib.request.urlopen(base + "/static/app.css", timeout=5).read().decode()
         assert ".rink .netminder" in css
+        assert ".team-row .scorers" in css
         assert ".rink .netminder.meta" in css
+        assert ".rink .net-plate" in css
         assert ".chiclet.dragging" in css and ".chiclet.collapsed" in css
         assert "dragstart" not in script  # pointer events drive the reorder, not HTML5 DnD
         assert urllib.request.urlopen(base + "/health", timeout=5).read() == b"ok\n"
