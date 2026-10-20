@@ -897,6 +897,45 @@ body.chiclet-dragging {
   color: var(--muted);
 }
 
+/* Power: offence / defence indexes, expected goals, and special teams, away left and home right. */
+.pwr {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.pwr-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.6rem minmax(0, 1fr);
+  gap: 0.18rem 0.3rem;
+  align-items: stretch;
+  font-family: var(--mono);
+}
+
+.pwr-team {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.pwr-label {
+  align-self: center;
+  text-align: center;
+  font-size: 0.54rem;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pwr .spg-cell small {
+  text-align: center;
+  white-space: normal;
+  line-height: 1.2;
+}
+
 /* Last five games for each team: result, then goals over shots on goal by period. */
 .last5 {
   display: flex;

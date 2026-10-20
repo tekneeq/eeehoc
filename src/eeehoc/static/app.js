@@ -5,6 +5,7 @@
     form: {},
     formLoading: new Set(),
     shots: null,
+    power: null,
     tab: "live",
     wp: { board: null, season: null, day: null, loading: false, error: null },
     filter: "all",
@@ -44,6 +45,7 @@
       if (ticks % 3 === 0) {
         loadPeriods();
         loadShots();
+        loadPower();
       }
       if (ticks % 3 === 0 && state.tab === "winprob") loadWinProb();
     }, LIVE_REFRESH_MS);
@@ -725,6 +727,186 @@
       </section>`;
   }
 
+  // ------------------------------------------------------------- Power
+
+  async function loadPower() {
+    try {
+      const res = await fetch("/api/power");
+      const board = await res.json();
+      if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      state.power = board;
+      // The first table takes a few seconds to build; ask again shortly.
+      if (board.loading) setTimeout(loadPower, 4000);
+      else if (state.board) renderLive();
+    } catch (err) {
+      console.warn("power numbers unavailable", err);
+    }
+  }
+
+  // Expected goals in this game, this team's share of the league rate.
+  function xgRow(game) {
+    const xg = game.xg;
+    if (!xg || (!xg.away?.located && !xg.home?.located)) return "";
+    const fake = {
+      away: { stats: { xg: xg.away.xg.toFixed(2) }, color: game.away.color, alt_color: game.away.alt_color },
+      home: { stats: { xg: xg.home.xg.toFixed(2) }, color: game.home.color, alt_color: game.home.alt_color },
+    };
+    return statRow("xG", "xg", fake);
+  }
+
+  const XG_EDGE = 0.3;
+
+  function fmtNum(value, digits = 2) {
+    return value === null || value === undefined ? "–" : Number(value).toFixed(digits);
+  }
+
+  function plural(n, word) {
+    return `${n} ${word}${n === 1 ? "" : "s"}`;
+  }
+
+  function rankText(rank, ranked) {
+    return rank ? `#${rank}/${ranked}` : "n/r";
+  }
+
+  // Each power row is one spec: how to read a team's cell from its row and the other team's.
+  function powerSpecs(league) {
+    const par = league.par_power || 50;
+    const ranked = league.teams_ranked || 0;
+    const perGame = league.goals_per_game || 0;
+    const minGames = state.power?.min_games || 2;
+    const expected = (attack, defence) => {
+      if (attack === null || attack === undefined || defence === null || defence === undefined || !perGame) return null;
+      return perGame * (Math.max(0, attack) / par) * (par / Math.max(1, defence));
+    };
+    const edge = (mine, theirs) => {
+      if (mine === null || theirs === null) return "";
+      if (mine - theirs >= XG_EDGE) return "up";
+      if (theirs - mine >= XG_EDGE) return "down";
+      return "";
+    };
+    const unranked = `unranked until ${minGames} games`;
+    return [
+      {
+        label: "Offence",
+        help: `Offence power: xG created, shots on goal, unblocked attempts and goals per game against the league, ranked of ${ranked}. ${par} = league average; higher creates more.`,
+        cell: (row) => ({
+          num: row.offense_power,
+          sub: `${rankText(row.offense_rank, ranked)} · ${fmtNum(row.goals_per_game)} g · ${fmtNum(row.xg_per_game)} xG`,
+          tone: row.potent ? "up" : "down",
+          title: `${row.abbr}: offence power ${row.offense_power} (${row.potent ? "potent" : "blunt"}) — ${fmtNum(row.goals_per_game)} goals, ${fmtNum(row.xg_per_game)} xG, ${fmtNum(row.sog_per_game, 1)} shots on goal and ${fmtNum(row.attempts_per_game, 1)} unblocked attempts per game over ${plural(row.games, "game")} · league ${fmtNum(league.goals_per_game)} goals, ${fmtNum(league.xg_per_game)} xG, ${fmtNum(league.sog_per_game, 1)} on goal, ${fmtNum(league.attempts_per_game, 1)} attempts · ${row.offense_rank ? `#${row.offense_rank} of ${ranked}` : unranked} · scores ${row.clinical} goals per 100 xG`,
+        }),
+      },
+      {
+        label: "Defence",
+        help: `Defence power: the league's xG allowed per game over this team's, ranked of ${ranked}. ${par} = league average; higher allows fewer and worse chances.`,
+        cell: (row) => ({
+          num: row.defense_power,
+          sub: `${rankText(row.defense_rank, ranked)} · ${fmtNum(row.ga_per_game)} ga · ${fmtNum(row.xga_per_game)} xGA`,
+          tone: row.solid ? "up" : "down",
+          title: `${row.abbr}: defence power ${row.defense_power} (${row.solid ? "solid" : "leaky"}) — allows ${fmtNum(row.xga_per_game)} xG and ${fmtNum(row.ga_per_game)} goals per game over ${plural(row.games, "game")} · league ${fmtNum(league.xg_per_game)} xG · ${row.defense_rank ? `#${row.defense_rank} of ${ranked}` : unranked}`,
+        }),
+      },
+      {
+        label: "Expected chances",
+        help: `Expected goals from chance quality: the league's ${fmtNum(perGame)} goals per team-game × this team's offence power over ${par} × ${par} over the other team's defence power. Green when favoured by ${XG_EDGE} or more.`,
+        cell: (row, opp) => {
+          const mine = expected(row.offense_power, opp.defense_power);
+          const theirs = expected(opp.offense_power, row.defense_power);
+          return {
+            num: fmtNum(mine),
+            sub: `off ${row.offense_power} × def ${opp.defense_power}`,
+            tone: edge(mine, theirs),
+            title: `${row.abbr}: ${fmtNum(mine)} expected goals from chances — league ${fmtNum(perGame)} per team-game × ${row.abbr} offence ${row.offense_power} (${rankText(row.offense_rank, ranked)}) × ${opp.abbr} defence ${opp.defense_power} (${rankText(opp.defense_rank, ranked)})`,
+          };
+        },
+      },
+      {
+        label: "Expected results",
+        help: `Expected goals from results only: the league's ${fmtNum(perGame)} goals per team-game × this team's scoring power (goals per game over the league's) × ${par} over the other team's stopping power (the league's goals over what it allows).`,
+        cell: (row, opp) => {
+          const mine = expected(row.scoring_power, opp.stopping_power);
+          const theirs = expected(opp.scoring_power, row.stopping_power);
+          return {
+            num: fmtNum(mine),
+            sub: `score ${row.scoring_power} × stop ${opp.stopping_power}`,
+            tone: edge(mine, theirs),
+            title: `${row.abbr}: ${fmtNum(mine)} expected goals from results — league ${fmtNum(perGame)} per team-game × ${row.abbr} scoring ${row.scoring_power} (${rankText(row.scoring_rank, ranked)}) × ${opp.abbr} stopping ${opp.stopping_power} (${rankText(opp.stopping_rank, ranked)})`,
+          };
+        },
+      },
+      {
+        label: "PP goals",
+        help: `Power-play goals out of all the goals this team has scored, then its conversion: goals for opportunities, ranked of ${ranked}. League converts ${fmtNum(league.pp_pct, 1)}% and scores ${fmtNum(league.pp_share, 0)}% of its goals on the power play.`,
+        cell: (row) => {
+          const pp = row.pp || {};
+          const pct = pp.pct;
+          const leaguePct = league.pp_pct;
+          const tone = pct === null || pct === undefined || !leaguePct ? "" : pct - leaguePct >= 3 ? "up" : leaguePct - pct >= 3 ? "down" : "";
+          return {
+            num: pp.games ? `${pp.goals}/${pp.of_goals}` : "–",
+            sub: pp.games ? `${pp.share === null ? "–" : `${pp.share}%`} of goals · ${pp.goals} for ${pp.opps} · ${fmtNum(pct, 1)}% ${rankText(pp.rank, ranked)}` : "no box scores",
+            tone,
+            title: `${row.abbr}: ${pp.goals} of its ${pp.of_goals} goals came on the power play (${pp.share === null ? "–" : `${pp.share}%`}) · ${pp.goals} for ${pp.opps} opportunities, ${fmtNum(pct, 1)}% (${rankText(pp.rank, ranked)}) · league ${fmtNum(leaguePct, 1)}%${pp.sh_goals ? ` · ${plural(pp.sh_goals, "shorthanded goal")} scored` : ""}`,
+          };
+        },
+      },
+      {
+        label: "PK allowed",
+        help: `Power-play goals allowed while shorthanded, how often this team was shorthanded, and the kill rate, ranked of ${ranked}. League kills ${fmtNum(100 - (league.pp_pct || 0), 1)}%.`,
+        cell: (row) => {
+          const pk = row.pk || {};
+          const pct = pk.pct;
+          const leaguePct = league.pp_pct ? 100 - league.pp_pct : null;
+          const tone = pct === null || pct === undefined || !leaguePct ? "" : pct - leaguePct >= 3 ? "up" : leaguePct - pct >= 3 ? "down" : "";
+          return {
+            num: pk.games ? String(pk.allowed) : "–",
+            sub: pk.games ? `${plural(pk.times_short, "kill")} · ${fmtNum(pct, 1)}% killed ${rankText(pk.rank, ranked)}` : "no box scores",
+            tone,
+            title: `${row.abbr}: allowed ${plural(pk.allowed, "power-play goal")} in ${plural(pk.times_short, "penalty kill")} — ${fmtNum(pct, 1)}% killed (${rankText(pk.rank, ranked)}) · ${pk.share === null ? "" : `${pk.share}% of the ${pk.of_goals} goals it has allowed · `}league ${fmtNum(leaguePct, 1)}%${pk.sh_goals_allowed ? ` · ${plural(pk.sh_goals_allowed, "shorthanded goal")} allowed` : ""}`,
+          };
+        },
+      },
+    ];
+  }
+
+  function powerCell(team, row, opp, spec) {
+    if (!row || !opp) {
+      return `<span class="spg-cell none" title="${esc(`${team.abbr}: no finished games this season yet`)}"><b>–</b><small>no games</small></span>`;
+    }
+    const cell = spec.cell(row, opp);
+    return `<span class="spg-cell ${cell.tone || ""}" title="${esc(cell.title)}"><b>${esc(String(cell.num))}</b><small>${esc(cell.sub)}</small></span>`;
+  }
+
+  function powerHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const league = board.league || {};
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    const seasonLabel = board.season_kind === "preseason" ? "preseason" : "season";
+    const key = `${league.par_power || 50} = league · ${plural(board.games || 0, `${seasonLabel} game`)}`;
+    const body = powerSpecs(league)
+      .map(
+        (spec) => `
+          ${powerCell(game.away, rows.away, rows.home, spec)}
+          <span class="pwr-label" title="${esc(spec.help)}">${esc(spec.label)}</span>
+          ${powerCell(game.home, rows.home, rows.away, spec)}`,
+      )
+      .join("");
+    return `
+      <section class="pwr" aria-label="Offence and defence power, expected goals, and special teams">
+        <div class="spg-head">
+          <span class="spg-label">Power</span>
+          <span class="spg-key" title="${esc(board.model || "")}">${esc(key)}</span>
+        </div>
+        <div class="pwr-grid">
+          <span class="pwr-team" style="color:${teamColor(game.away)}">${esc(game.away.abbr)}</span>
+          <span></span>
+          <span class="pwr-team" style="color:${teamColor(game.home)}">${esc(game.home.abbr)}</span>
+          ${body}
+        </div>
+      </section>`;
+  }
+
   function fmtFormDate(iso) {
     if (!iso) return "";
     const d = new Date(iso);
@@ -820,7 +1002,7 @@
     const lp = s?.last_play;
     const pp = s?.power_play ? " power-play" : "";
     const showShots = game.state !== "pre";
-    const core = showShots ? statRow("On goal", "shots", game) : "";
+    const core = showShots ? statRow("On goal", "shots", game) + xgRow(game) : "";
     const more = expanded
       ? [
           statRow("Hits", "hits", game),
@@ -901,6 +1083,7 @@
         ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${shotsPerGoalHtml(game)}
+        ${powerHtml(game)}
         ${goalLog(game)}
         ${lastFiveHtml(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
@@ -1648,5 +1831,6 @@
   loadLive();
   loadPeriods();
   loadShots();
+  loadPower();
   scheduleLive();
 })();
