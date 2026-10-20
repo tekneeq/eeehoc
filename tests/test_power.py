@@ -153,6 +153,21 @@ def test_build_power_ranks_offence_defence_and_special_teams():
     assert buf["pk"]["allowed"] == 0 and buf["pk"]["times_short"] == 2 and buf["pk"]["pct"] == 100.0
     assert league["pp_pct"] == 27.3  # 3 for 11 league-wide
 
+    # First period: BUF put 13 on goal in the first (10 saved + 3 goals) and finished with 3;
+    # CBJ's misses are not on goal, so its one goal is its only first-period shot in each game.
+    assert [b["label"] for b in buf["first_period"]["buckets"]] == ["0–4", "5–9", "10–14", "15–19", "20+"]
+    assert buf["first_period"]["games"] == 1
+    assert buf["first_period"]["buckets"][2] == {"label": "10–14", "low": 10, "high": 14, "games": 1, "goals": 3, "wins": 1, "avg": 3.0}
+    assert cbj["first_period"]["buckets"][0] == {"label": "0–4", "low": 0, "high": 4, "games": 2, "goals": 2, "wins": 0, "avg": 1.0}
+    assert cbj["first_period"]["goals_per_game"] == 1.0
+    assert league["first_period"]["games"] == 4 and league["first_period"]["buckets"][2]["games"] == 2
+    assert league["first_period"]["buckets"][2]["avg"] == 3.5  # BUF 3 and DET 4
+
+    # No NHL shift charts in these fixtures: lines are empty but well-formed
+    assert cbj["lines"]["games"] == 0 and cbj["lines"]["scored"]["total"] == 0
+    assert cbj["lines"]["scored"]["line_pct"] == [None, None, None, None]
+    assert board["lines_note"]
+
 
 def test_build_power_falls_back_to_preseason():
     records = [game_record(s) for s in _games() if s["header"]["season"]["type"] == 1]
@@ -212,6 +227,52 @@ def test_feed_fetches_each_final_once_and_serves_in_the_background():
     assert again["games"] == 2 and "loading" not in again
 
 
+class _FakeLines:
+    """Stands in for the NHL feeds: lines for r1 only, and r2 lands on the second ask."""
+
+    def __init__(self):
+        self.asked = []
+
+    def for_record(self, record, now):
+        self.asked.append(record["id"])
+        units = lambda line, pair, total: {"line": line, "pair": pair, "line_none": 0, "pair_none": 0, "total": total}  # noqa: E731
+        if record["id"] == "r1":
+            return {
+                "home": {"lines": [], "pairs": [], "for": units([2, 1, 0, 0], [3, 0, 0], 3), "against": units([0, 0, 1, 0], [0, 1, 0], 1)},
+                "away": {"lines": [], "pairs": [], "for": units([0, 0, 1, 0], [0, 1, 0], 1), "against": units([2, 1, 0, 0], [3, 0, 0], 3)},
+                "goals": [],
+            }
+        if record["id"] == "r2" and self.asked.count("r2") >= 2:
+            return {
+                "home": {"lines": [], "pairs": [], "for": units([4, 0, 0, 0], [4, 0, 0], 4), "against": units([0, 0, 0, 1], [0, 0, 1], 1)},
+                "away": {"lines": [], "pairs": [], "for": units([0, 0, 0, 1], [0, 0, 1], 1), "against": units([4, 0, 0, 0], [4, 0, 0], 4)},
+                "goals": [],
+            }
+        return None
+
+
+def test_feed_attaches_lines_and_keeps_asking_until_the_nhl_has_them():
+    fetch, _calls = _fetch_for(_games())
+    source = _FakeLines()
+    feed = PowerFeed(fetch, workers=1, lines=source)
+    board = feed.refresh(today=TODAY)
+    cbj = board["teams"][CBJ]
+    # Only r1 has lines so far: CBJ allowed 3 there (two on L1, one on L2) and scored once from L3.
+    assert cbj["lines"]["games"] == 1
+    assert cbj["lines"]["scored"]["line"] == [0, 0, 1, 0] and cbj["lines"]["scored"]["line_pct"] == [0.0, 0.0, 100.0, 0.0]
+    assert cbj["lines"]["allowed"]["line"] == [2, 1, 0, 0] and cbj["lines"]["allowed"]["pair"] == [3, 0, 0]
+    assert board["league"]["lines"]["games"] == 1 and board["league"]["lines"]["scored"]["total"] == 4
+
+    board = feed.refresh(today=TODAY)
+    cbj = board["teams"][CBJ]
+    assert cbj["lines"]["games"] == 2
+    assert cbj["lines"]["scored"]["line"] == [0, 0, 1, 1] and cbj["lines"]["scored"]["line_pct"] == [0.0, 0.0, 50.0, 50.0]
+    assert cbj["lines"]["allowed"]["line"] == [6, 1, 0, 0] and cbj["lines"]["allowed"]["line_pct"] == [86.0, 14.0, 0.0, 0.0]
+    assert cbj["lines"]["allowed"]["total"] == 7
+    # r1 was never asked again once it had lines; r9 (tomorrow) is still asked, r2 twice before it landed
+    assert source.asked.count("r1") == 1 and source.asked.count("r2") == 2
+
+
 def test_power_endpoint_and_page_shell():
     from eeehoc.dashboard import DashboardState, make_handler
 
@@ -225,9 +286,13 @@ def test_power_endpoint_and_page_shell():
         assert board["league"]["par_power"] == PAR_POWER
         assert board["teams"][CBJ]["pk"]["allowed"] == 3
         script = urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
+        assert board["teams"][BUF]["first_period"]["buckets"][2]["goals"] == 3
+        assert "lines" in board["teams"][BUF] and "first_period" in board["league"]
+        script = urllib.request.urlopen(base + "/static/app.js", timeout=5).read().decode()
         assert all(token in script for token in ("/api/power", "powerHtml", "xgRow", "Expected chances", "PP goals", "PK allowed"))
+        assert all(token in script for token in ("linesHtml", "firstPeriodHtml", "Goals by line", "1st-period shots"))
         css = urllib.request.urlopen(base + "/static/app.css", timeout=5).read().decode()
-        assert ".pwr-grid" in css
+        assert ".pwr-grid" in css and ".gbl-bar" in css and ".p1b-grid" in css
     finally:
         httpd.shutdown()
         httpd.server_close()

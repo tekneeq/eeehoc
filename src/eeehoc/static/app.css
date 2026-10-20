@@ -936,6 +936,177 @@ body.chiclet-dragging {
   line-height: 1.2;
 }
 
+/* Goals by line: each team's goals scored and allowed split by the forward line and defence pair on the ice. */
+.gbl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+}
+
+.gbl-team {
+  display: grid;
+  grid-template-columns: 2.6rem 3.4rem minmax(0, 1fr);
+  grid-auto-rows: 0.98rem;
+  gap: 0.12rem 0.3rem;
+  align-items: center;
+}
+
+.gbl-name {
+  grid-row: span 4;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--team);
+  line-height: 1;
+}
+
+.gbl-name small {
+  font-size: 0.5rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.gbl-k {
+  font-size: 0.52rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.gbl-bar {
+  display: flex;
+  height: 0.9rem;
+  border-radius: 0.24rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gbl-bar.empty {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.gbl-bar.empty small {
+  font-size: 0.52rem;
+}
+
+.gbl-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  font-style: normal;
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: #0b1016;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.gbl-seg span {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gbl-seg.u1 {
+  background: var(--accent);
+}
+
+.gbl-seg.u2 {
+  background: var(--ice);
+}
+
+.gbl-seg.u3 {
+  background: var(--warn);
+}
+
+.gbl-seg.u4 {
+  background: #f39ad6;
+}
+
+.gbl-seg.none {
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--text);
+}
+
+.gbl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.52rem;
+  color: var(--muted);
+}
+
+.gbl-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.gbl-legend .gbl-seg {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 0.12rem;
+  box-shadow: none;
+}
+
+.gbl-legend em {
+  margin-left: auto;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+/* First-period shots on goal, bucketed, against the goals the team finished the game with. */
+.p1b {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.p1b-grid {
+  display: grid;
+  gap: 0.15rem 0.3rem;
+  align-items: stretch;
+  font-family: var(--mono);
+}
+
+.p1b-sog {
+  text-align: left;
+  align-self: end;
+  font-size: 0.5rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.p1b-grid .spg-cell small {
+  white-space: nowrap;
+}
+
+.p1b-span {
+  grid-column: 2 / -1;
+  flex-direction: row;
+}
+
+.spg-cell.now {
+  outline: 2px solid var(--ice);
+  outline-offset: -1px;
+  background: rgba(159, 212, 255, 0.1);
+}
+
 /* Last five games for each team: result, then goals over shots on goal by period. */
 .last5 {
   display: flex;

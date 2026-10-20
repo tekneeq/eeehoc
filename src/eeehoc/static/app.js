@@ -907,6 +907,130 @@
       </section>`;
   }
 
+  // ------------------------------------------------------ Goals by line
+
+  const UNIT_NAMES = { line: ["L1", "L2", "L3", "L4"], pair: ["D1", "D2", "D3"] };
+
+  function unitBar(team, units, kind, verb) {
+    const total = units?.total || 0;
+    const counts = units?.[kind] || [];
+    const none = units?.[`${kind}_none`] || 0;
+    if (!total) {
+      return `<span class="gbl-bar empty" title="${esc(`${team.abbr}: no goals ${verb} in games with a shift chart yet`)}"><small>–</small></span>`;
+    }
+    const names = UNIT_NAMES[kind];
+    const word = kind === "line" ? "line" : "pair";
+    const segs = counts
+      .map((n, i) => ({ n, i, label: names[i] }))
+      .concat(none ? [{ n: none, i: -1, label: "other" }] : [])
+      .filter((s) => s.n > 0)
+      .map((s) => {
+        const pct = (100 * s.n) / total;
+        const cls = s.i < 0 ? "none" : `u${s.i + 1}`;
+        const title = s.i < 0 ? `${team.abbr}: ${plural(s.n, "goal")} ${verb} with no ${word} member on the ice (${Math.round(pct)}%)` : `${team.abbr}: ${s.n} of ${total} goals ${verb} with ${s.label} on the ice (${Math.round(pct)}%)`;
+        const text = pct >= 14 ? `${Math.round(pct)}%` : pct >= 8 ? s.label : "";
+        return `<i class="gbl-seg ${cls}" style="width:${pct.toFixed(2)}%" title="${esc(title)}"><span>${esc(text)}</span></i>`;
+      })
+      .join("");
+    return `<span class="gbl-bar" role="img" aria-label="${esc(`${team.abbr} goals ${verb} by ${word}`)}">${segs}</span>`;
+  }
+
+  function linesTeamHtml(team, row) {
+    const lines = row?.lines;
+    const games = lines?.games || 0;
+    const note = games ? `${plural(games, "game")} with shift charts` : "waiting on NHL shift charts";
+    return `
+      <div class="gbl-team" style="--team:${teamColor(team)}">
+        <span class="gbl-name" title="${esc(`${team.abbr}: ${note}`)}">${esc(team.abbr)}<small>${esc(games ? `${games} gp` : "…")}</small></span>
+        <span class="gbl-k" title="Which forward line this team's goals came from">Scored</span>${unitBar(team, lines?.scored, "line", "scored")}
+        <span class="gbl-k" title="Which forward line was on the ice for the goals this team allowed">Allowed</span>${unitBar(team, lines?.allowed, "line", "allowed")}
+        <span class="gbl-k" title="Which defence pair was on the ice for this team's goals">D scored</span>${unitBar(team, lines?.scored, "pair", "scored")}
+        <span class="gbl-k" title="Which defence pair was on the ice for the goals this team allowed">D allowed</span>${unitBar(team, lines?.allowed, "pair", "allowed")}
+      </div>`;
+  }
+
+  function linesHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    if (!rows.away && !rows.home) return "";
+    const league = board.league?.lines;
+    const leaguePct = league?.scored?.line_pct || [];
+    const leagueKey = league?.games ? `NHL ${leaguePct.map((p, i) => `${UNIT_NAMES.line[i]} ${p === null ? "–" : `${Math.round(p)}%`}`).join(" · ")}` : "";
+    const legend = ["L1 / D1", "L2 / D2", "L3 / D3", "L4"].map((label, i) => `<span><i class="gbl-seg u${i + 1}"></i>${esc(label)}</span>`).join("") + `<span><i class="gbl-seg none"></i>other</span>`;
+    return `
+      <section class="gbl" aria-label="Where each team's goals come from and which lines allow them">
+        <div class="spg-head">
+          <span class="spg-label">Goals by line</span>
+          <span class="spg-key" title="${esc(board.lines_note || "")}">share of goals · lines by ice time</span>
+        </div>
+        ${linesTeamHtml(game.away, rows.away)}
+        ${linesTeamHtml(game.home, rows.home)}
+        <div class="gbl-legend" title="${esc(leagueKey ? `League share of goals scored by line: ${leagueKey.slice(4)}` : "")}">${legend}${leagueKey ? `<em>${esc(leagueKey)}</em>` : ""}</div>
+      </section>`;
+  }
+
+  // ------------------------------------------- First-period shots → goals
+
+  const P1_EDGE = 0.5;
+
+  function p1Bucket(buckets, sog) {
+    return buckets.findIndex((b) => sog >= b.low && (b.high === null || b.high === undefined || sog <= b.high));
+  }
+
+  // The team's first-period shots on goal tonight, once the first period is over.
+  function p1Tonight(game, side) {
+    if (game.state === "pre" || !(game.period > 1 || game.state === "post")) return null;
+    const first = (game.period_shots || []).find((row) => row.period === 1);
+    return first ? first[`${side}_sog`] ?? null : null;
+  }
+
+  function p1Cell(team, bucket, baseline, tonight) {
+    const live = tonight !== null && tonight !== undefined && tonight >= bucket.low && (bucket.high === null || tonight <= bucket.high);
+    const now = live ? " now" : "";
+    if (!bucket.games) {
+      const title = `${team.abbr}: no games yet with ${bucket.label} shots on goal in the 1st${live ? ` · tonight: ${tonight} in the 1st` : ""}`;
+      return `<span class="spg-cell none${now}" title="${esc(title)}"><b>–</b><small>0 gp</small></span>`;
+    }
+    const tone = baseline === null || baseline === undefined ? "" : bucket.avg - baseline >= P1_EDGE ? "up" : baseline - bucket.avg >= P1_EDGE ? "down" : "";
+    const title = `${team.abbr}: in ${plural(bucket.games, "game")} with ${bucket.label} shots on goal in the 1st period it finished with ${plural(bucket.goals, "goal")} — ${fmtNum(bucket.avg)} per game${baseline !== null && baseline !== undefined ? ` against its ${fmtNum(baseline)} average` : ""} · won ${bucket.wins}${live ? ` · tonight: ${tonight} on goal in the 1st` : ""}`;
+    return `<span class="spg-cell ${tone}${now}" title="${esc(title)}"><b>${fmtNum(bucket.avg)}</b><small>${esc(`${bucket.games} gp · ${bucket.wins}W`)}</small></span>`;
+  }
+
+  function p1Row(team, fp, game, side) {
+    const buckets = fp?.buckets || [];
+    const tonight = game ? p1Tonight(game, side) : null;
+    const label = `<span class="spg-name" style="color:${team.league ? "var(--muted)" : teamColor(team)}" title="${esc(`${team.abbr}: ${plural(fp?.games || 0, "game")} with a first-period shot count · ${fmtNum(fp?.goals_per_game)} goals per game`)}">${esc(team.abbr)}</span>`;
+    if (!buckets.length) {
+      return `${label}<span class="spg-cell none p1b-span"><small>no finished games yet</small></span>`;
+    }
+    return label + buckets.map((b) => p1Cell(team, b, fp.goals_per_game, tonight)).join("");
+  }
+
+  function firstPeriodHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    const leagueFp = board.league?.first_period;
+    if (!rows.away && !rows.home && !leagueFp?.games) return "";
+    const buckets = (leagueFp?.buckets || rows.away?.first_period?.buckets || rows.home?.first_period?.buckets || []).map((b) => b.label);
+    const head = buckets.map((label) => `<span class="spg-h" title="${esc(`${label} shots on goal in the 1st period`)}">${esc(label)}</span>`).join("");
+    const nhl = { abbr: "NHL", league: true };
+    return `
+      <section class="p1b" aria-label="Goals in the game by first-period shots on goal">
+        <div class="spg-head">
+          <span class="spg-label">1st-period shots → goals</span>
+          <span class="spg-key" title="Each team's finished games sorted by its shots on goal in the first period, and how many goals it ended the game with. Green when that bucket runs half a goal above the team's average, amber when half a goal below. The outlined cell is tonight's first period.">goals in game · <small>avg · gp · wins</small></span>
+        </div>
+        <div class="p1b-grid" style="grid-template-columns: 2.6rem repeat(${Math.max(1, buckets.length)}, minmax(0, 1fr))">
+          <span class="spg-h p1b-sog">1st SOG</span>${head}
+          ${p1Row(game.away, rows.away?.first_period, game, "away")}
+          ${p1Row(game.home, rows.home?.first_period, game, "home")}
+          ${leagueFp?.games ? p1Row(nhl, leagueFp, null, "") : ""}
+        </div>
+      </section>`;
+  }
+
   function fmtFormDate(iso) {
     if (!iso) return "";
     const d = new Date(iso);
@@ -1084,6 +1208,8 @@
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${shotsPerGoalHtml(game)}
         ${powerHtml(game)}
+        ${linesHtml(game)}
+        ${firstPeriodHtml(game)}
         ${goalLog(game)}
         ${lastFiveHtml(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}

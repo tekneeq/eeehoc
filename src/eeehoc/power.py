@@ -20,6 +20,11 @@ clinical module, on hockey's inputs.
 * ``pp`` is the power play: goals, opportunities, conversion, and the share
   of the club's goals that came on the power play. ``pk`` is the penalty
   kill: power-play goals allowed, times shorthanded, and the kill rate.
+* ``lines`` is where the goals come from: how many (and what share) the club
+  scored from each forward line L1–L4 and defence pair D1–D3, and how many it
+  allowed while each was on the ice, from ``eeehoc.lines``.
+* ``first_period`` sorts the club's games by its first-period shots on goal
+  (``P1_BUCKETS``) and says how many goals it finished those games with.
 * Ranks are 1 = best among clubs with at least ``MIN_GAMES`` finals.
 """
 
@@ -31,7 +36,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from typing import Any
 
-from eeehoc.live import PLAYOFF_TYPE, SCOREBOARD_URL, SUMMARY_URL, FetchJson, _int, fetch_json
+from eeehoc.lines import LINE_COUNT, LINES_NOTE, PAIR_COUNT, LineSource
+from eeehoc.live import PLAYOFF_TYPE, SCOREBOARD_URL, SUMMARY_URL, FetchJson, _int, fetch_json, period_shot_lines
 from eeehoc.periods import ET, PRESEASON_TYPE, REGULAR_TYPE, _game_day, _months, _season_meta
 from eeehoc.xg import MODEL_NOTE, game_xg
 
@@ -40,6 +46,9 @@ PRIOR_GAMES = 2.0
 PRIOR_XG = 2.0
 MIN_GAMES = 2
 OFFENSE_WEIGHTS = {"xg": 0.40, "sog": 0.20, "attempts": 0.15, "goals": 0.25}
+
+# First-period shots on goal, lower bound inclusive; None = no upper bound.
+P1_BUCKETS: list[tuple[int, int | None]] = [(0, 4), (5, 9), (10, 14), (15, 19), (20, None)]
 
 CURRENT_MONTH_TTL = 90.0
 PAST_MONTH_TTL = 6 * 60 * 60.0
@@ -87,6 +96,7 @@ def game_record(summary: dict[str, Any], *, event_id: str = "") -> dict[str, Any
     playoffs = season_type == PLAYOFF_TYPE
     plays = summary.get("plays") or []
     shots = game_xg(plays, home_id, away_id, playoffs=playoffs) if plays else None
+    first = period_shot_lines(plays, home_id, away_id, periods=1, playoffs=playoffs)[:1] if plays else []
     box = _box_stats(summary, home_id, away_id)
     iso = str(comp.get("date") or "")
     day = _game_day(iso)
@@ -104,6 +114,7 @@ def game_record(summary: dict[str, Any], *, event_id: str = "") -> dict[str, Any
             "ppg": box[side].get("ppg"),
             "ppo": box[side].get("ppo"),
             "shg": box[side].get("shg"),
+            "p1_sog": first[0][f"{side}_sog"] if first else None,
         }
     return {
         "id": str(header.get("id") or comp.get("id") or event_id),
@@ -114,7 +125,37 @@ def game_record(summary: dict[str, Any], *, event_id: str = "") -> dict[str, Any
         "plays": bool(plays),
         "home": sides["home"],
         "away": sides["away"],
+        "lines": None,
     }
+
+
+def p1_bucket(sog: int) -> int:
+    for index, (low, high) in enumerate(P1_BUCKETS):
+        if sog >= low and (high is None or sog <= high):
+            return index
+    return len(P1_BUCKETS) - 1
+
+
+def p1_bucket_label(index: int) -> str:
+    low, high = P1_BUCKETS[index]
+    return f"{low}+" if high is None else f"{low}–{high}"
+
+
+def _blank_buckets() -> list[dict[str, int]]:
+    return [{"games": 0, "goals": 0, "wins": 0} for _ in P1_BUCKETS]
+
+
+def _blank_units() -> dict[str, Any]:
+    return {"line": [0] * LINE_COUNT, "pair": [0] * PAIR_COUNT, "line_none": 0, "pair_none": 0, "total": 0}
+
+
+def _add_units(into: dict[str, Any], more: dict[str, Any]) -> None:
+    for kind in ("line", "pair"):
+        counts = more.get(kind) or []
+        for index, value in enumerate(counts[: len(into[kind])]):
+            into[kind][index] += _int(value)
+        into[f"{kind}_none"] += _int(more.get(f"{kind}_none"))
+    into["total"] += _int(more.get("total"))
 
 
 def _blank(team_id: str, abbr: str) -> dict[str, Any]:
@@ -140,6 +181,11 @@ def _blank(team_id: str, abbr: str) -> dict[str, Any]:
         "shg_f": 0,
         "shg_a": 0,
         "games_pp": 0,
+        "games_lines": 0,
+        "lines_for": _blank_units(),
+        "lines_against": _blank_units(),
+        "games_p1": 0,
+        "p1": _blank_buckets(),
     }
 
 
@@ -174,7 +220,48 @@ def _accumulate(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                 row["tsh"] += them["ppo"] or 0
                 row["shg_f"] += me["shg"] or 0
                 row["shg_a"] += them["shg"] or 0
+            lines = rec.get("lines")
+            if lines and isinstance(lines.get(side), dict):
+                row["games_lines"] += 1
+                _add_units(row["lines_for"], lines[side].get("for") or {})
+                _add_units(row["lines_against"], lines[side].get("against") or {})
+            if me.get("p1_sog") is not None:
+                row["games_p1"] += 1
+                bucket = row["p1"][p1_bucket(me["p1_sog"])]
+                bucket["games"] += 1
+                bucket["goals"] += me["goals"]
+                bucket["wins"] += 1 if me["goals"] > them["goals"] else 0
     return teams
+
+
+def _units_out(units: dict[str, Any]) -> dict[str, Any]:
+    total = units["total"]
+    return {
+        "total": total,
+        "line": list(units["line"]),
+        "line_pct": [_pct(n, total, 0) for n in units["line"]],
+        "line_none": units["line_none"],
+        "line_none_pct": _pct(units["line_none"], total, 0),
+        "pair": list(units["pair"]),
+        "pair_pct": [_pct(n, total, 0) for n in units["pair"]],
+        "pair_none": units["pair_none"],
+        "pair_none_pct": _pct(units["pair_none"], total, 0),
+    }
+
+
+def _buckets_out(buckets: list[dict[str, int]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": p1_bucket_label(index),
+            "low": P1_BUCKETS[index][0],
+            "high": P1_BUCKETS[index][1],
+            "games": b["games"],
+            "goals": b["goals"],
+            "wins": b["wins"],
+            "avg": _per_game(b["goals"], b["games"]),
+        }
+        for index, b in enumerate(buckets)
+    ]
 
 
 def _shrunk(total: float, games: float, par: float) -> float:
@@ -307,8 +394,29 @@ def build_power(records: list[dict[str, Any]], *, today: date, season_year: int,
                     "share": _pct(r["ppga"], r["ga"], 0) if r["games_pp"] else None,
                     "sh_goals_allowed": r["shg_a"],
                 },
+                "lines": {
+                    "games": r["games_lines"],
+                    "scored": _units_out(r["lines_for"]),
+                    "allowed": _units_out(r["lines_against"]),
+                },
+                "first_period": {
+                    "games": r["games_p1"],
+                    "goals_per_game": _per_game(sum(b["goals"] for b in r["p1"]), r["games_p1"]),
+                    "buckets": _buckets_out(r["p1"]),
+                },
             }
         )
+
+    league_lines = _blank_units()
+    league_lines_against = _blank_units()
+    league_p1 = _blank_buckets()
+    for r in rows:
+        _add_units(league_lines, r["lines_for"])
+        _add_units(league_lines_against, r["lines_against"])
+        for index, b in enumerate(r["p1"]):
+            for key in ("games", "goals", "wins"):
+                league_p1[index][key] += b[key]
+    league_p1_games = sum(b["games"] for b in league_p1)
 
     ranked = {r["id"] for r in out_rows if r["games"] >= MIN_GAMES}
     _rank(out_rows, "offense_power", "offense_rank", ranked=ranked)
@@ -347,7 +455,18 @@ def build_power(records: list[dict[str, Any]], *, today: date, season_year: int,
             "pp_share": _pct(league_ppg, league_gf_pp, 0),
             "games_with_plays": xg_games // 2,
             "games_with_pp": pp_games // 2,
+            "lines": {
+                "games": sum(r["games_lines"] for r in rows) // 2,
+                "scored": _units_out(league_lines),
+                "allowed": _units_out(league_lines_against),
+            },
+            "first_period": {
+                "games": league_p1_games,
+                "goals_per_game": _per_game(sum(b["goals"] for b in league_p1), league_p1_games),
+                "buckets": _buckets_out(league_p1),
+            },
         },
+        "lines_note": LINES_NOTE,
         "teams": {row["id"]: row for row in out_rows},
     }
 
@@ -377,8 +496,9 @@ def _finals(payload: dict[str, Any]) -> list[dict[str, Any]]:
 class PowerFeed:
     """Season finals rolled into power numbers; refreshes in the background."""
 
-    def __init__(self, fetch: FetchJson = fetch_json, *, workers: int = 6) -> None:
+    def __init__(self, fetch: FetchJson = fetch_json, *, workers: int = 6, lines: LineSource | None = None) -> None:
         self._fetch = fetch
+        self._lines = lines if lines is not None else LineSource(fetch)
         self._workers = max(1, workers)
         self._lock = threading.Lock()
         self._months: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -417,26 +537,35 @@ class PowerFeed:
         eid = final["id"]
         with self._lock:
             hit = self._records.get(eid)
-            if hit is not None:
-                return hit
-            if now - self._misses.get(eid, 0.0) < MISS_TTL:
+            if hit is None and now - self._misses.get(eid, 0.0) < MISS_TTL:
                 return None
-        try:
-            summary = self._fetch(SUMMARY_URL.format(event_id=eid))
-            record = game_record(summary, event_id=eid) if isinstance(summary, dict) else None
-        except Exception as exc:  # noqa: BLE001 - one missing game must not sink the table
-            self._last_error = str(exc)
-            record = None
-        with self._lock:
-            if record is None:
-                self._misses[eid] = now
-                return None
-            # The month scoreboard knows the season; a summary header sometimes does not.
-            record["season_year"] = record["season_year"] or final["season_year"]
-            record["season_type"] = record["season_type"] or final["season_type"]
-            record["date"] = record["date"] or final["date"]
-            self._records[eid] = record
-            return record
+        record = hit
+        if record is None:
+            try:
+                summary = self._fetch(SUMMARY_URL.format(event_id=eid))
+                record = game_record(summary, event_id=eid) if isinstance(summary, dict) else None
+            except Exception as exc:  # noqa: BLE001 - one missing game must not sink the table
+                self._last_error = str(exc)
+                record = None
+            with self._lock:
+                if record is None:
+                    self._misses[eid] = now
+                    return None
+                # The month scoreboard knows the season; a summary header sometimes does not.
+                record["season_year"] = record["season_year"] or final["season_year"]
+                record["season_type"] = record["season_type"] or final["season_type"]
+                record["date"] = record["date"] or final["date"]
+                if not record["day"]:
+                    day = _game_day(record["date"])
+                    record["day"] = day.isoformat() if day else ""
+                self._records[eid] = record
+        # The NHL posts a game's shift chart a little after the final; keep asking until it lands.
+        if record.get("lines") is None:
+            lines = self._lines.for_record(record, now)
+            if lines is not None:
+                with self._lock:
+                    record["lines"] = lines
+        return record
 
     def refresh(self, *, today: date | None = None) -> dict[str, Any]:
         """Rebuild now, fetching any finals not seen yet."""
@@ -454,7 +583,7 @@ class PowerFeed:
         finals: list[dict[str, Any]] = []
         for ym in _months(date(year - 1, 9, 1), today):
             finals.extend(_finals(self._load_month(ym, now, today)))
-        finals = [f for f in finals if f["season_year"] == year or not f["season_year"]]
+        finals = list({f["id"]: f for f in finals if f["season_year"] == year or not f["season_year"]}.values())
         regular = [f for f in finals if f["season_type"] in (REGULAR_TYPE, PLAYOFF_TYPE)]
         wanted = regular or [f for f in finals if f["season_type"] == PRESEASON_TYPE]
         with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(wanted)))) as pool:
