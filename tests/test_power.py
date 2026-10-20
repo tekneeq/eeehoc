@@ -150,7 +150,7 @@ def test_build_power_ranks_offence_defence_and_special_teams():
     assert cbj["pk"]["allowed"] == 3 and cbj["pk"]["times_short"] == 7 and cbj["pk"]["pct"] == 57.1
     assert cbj["pk"]["share"] == 43.0  # 3 of the 7 goals it allowed
     assert cbj["pk"]["rank"] == 1
-    assert buf["pk"] ["allowed"] == 0 and buf["pk"]["times_short"] == 2 and buf["pk"]["pct"] == 100.0
+    assert buf["pk"]["allowed"] == 0 and buf["pk"]["times_short"] == 2 and buf["pk"]["pct"] == 100.0
     assert league["pp_pct"] == 27.3  # 3 for 11 league-wide
 
 
