@@ -962,7 +962,7 @@
       <section class="gbl" aria-label="Where each team's goals come from and which lines allow them">
         <div class="spg-head">
           <span class="spg-label">Goals by line</span>
-          <span class="spg-key" title="${esc(board.lines_note || "")}">share of goals · lines by ice time</span>
+          <span class="spg-key" title="${esc(`${board.lines_note || ""} The NHL has posted shift charts for ${league?.games || 0} of the ${board.games || 0} finals this season.`)}">share of goals · <small>${esc(`${league?.games || 0}/${board.games || 0} games charted`)}</small></span>
         </div>
         ${linesTeamHtml(game.away, rows.away)}
         ${linesTeamHtml(game.home, rows.home)}
@@ -980,7 +980,9 @@
 
   // The team's first-period shots on goal tonight, once the first period is over.
   function p1Tonight(game, side) {
-    if (game.state === "pre" || !(game.period > 1 || game.state === "post")) return null;
+    if (game.state === "pre") return null;
+    const firstOver = game.period > 1 || game.state === "post" || (game.period === 1 && /^0?0:00(\.0+)?$/.test(String(game.clock || "")));
+    if (!firstOver) return null;
     const first = (game.period_shots || []).find((row) => row.period === 1);
     return first ? first[`${side}_sog`] ?? null : null;
   }

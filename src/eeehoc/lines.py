@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
+from datetime import date, datetime
 from typing import Any
 
 from eeehoc.live import FetchJson, _int, fetch_json
+from eeehoc.periods import ET
 
 NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/schedule/{day}"
 NHL_PBP_URL = "https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play"
@@ -37,7 +39,10 @@ SHIFT_TYPE = 517
 PERIOD_SECONDS = 20 * 60
 NHL_PLAYOFFS = 3
 
+# A fresh final's shift chart lands within minutes; an old game without one is rarely backfilled.
 MISS_TTL = 10 * 60.0
+OLD_MISS_TTL = 6 * 60 * 60.0
+OLD_AFTER_DAYS = 2
 SCHEDULE_TTL = 6 * 60 * 60.0
 
 LINES_NOTE = (
@@ -45,6 +50,15 @@ LINES_NOTE = (
     "even-strength ice time and numbered by how much the trio played. A goal belongs to the line with "
     "the most members on the ice when it went in — for the team that scored and the team that allowed it."
 )
+
+
+def _miss_ttl(day: str, now: float) -> float:
+    try:
+        played = date.fromisoformat(day)
+    except ValueError:
+        return MISS_TTL
+    age = (datetime.fromtimestamp(now, ET).date() - played).days
+    return OLD_MISS_TTL if age > OLD_AFTER_DAYS else MISS_TTL
 
 
 def nhl_abbr(espn_abbr: str) -> str:
@@ -305,7 +319,7 @@ class LineSource:
             return None
         miss_key = f"{day}:{away}@{home}"
         with self._lock:
-            if now - self._misses.get(miss_key, 0.0) < MISS_TTL:
+            if now - self._misses.get(miss_key, 0.0) < _miss_ttl(day, now):
                 return None
         try:
             gid, game_type = self._day_games(day, now).get((away, home), (0, 0))
