@@ -5,6 +5,7 @@
     form: {},
     formLoading: new Set(),
     shots: null,
+    power: null,
     tab: "live",
     wp: { board: null, season: null, day: null, loading: false, error: null },
     filter: "all",
@@ -44,6 +45,7 @@
       if (ticks % 3 === 0) {
         loadPeriods();
         loadShots();
+        loadPower();
       }
       if (ticks % 3 === 0 && state.tab === "winprob") loadWinProb();
     }, LIVE_REFRESH_MS);
@@ -725,6 +727,312 @@
       </section>`;
   }
 
+  // ------------------------------------------------------------- Power
+
+  async function loadPower() {
+    try {
+      const res = await fetch("/api/power");
+      const board = await res.json();
+      if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      state.power = board;
+      // The first table takes a few seconds to build; ask again shortly.
+      if (board.loading) setTimeout(loadPower, 4000);
+      else if (state.board) renderLive();
+    } catch (err) {
+      console.warn("power numbers unavailable", err);
+    }
+  }
+
+  // Expected goals in this game, this team's share of the league rate.
+  function xgRow(game) {
+    const xg = game.xg;
+    if (!xg || (!xg.away?.located && !xg.home?.located)) return "";
+    const fake = {
+      away: { stats: { xg: xg.away.xg.toFixed(2) }, color: game.away.color, alt_color: game.away.alt_color },
+      home: { stats: { xg: xg.home.xg.toFixed(2) }, color: game.home.color, alt_color: game.home.alt_color },
+    };
+    return statRow("xG", "xg", fake);
+  }
+
+  const XG_EDGE = 0.3;
+
+  function fmtNum(value, digits = 2) {
+    return value === null || value === undefined ? "–" : Number(value).toFixed(digits);
+  }
+
+  function plural(n, word) {
+    return `${n} ${word}${n === 1 ? "" : "s"}`;
+  }
+
+  function rankText(rank, ranked) {
+    return rank ? `#${rank}/${ranked}` : "n/r";
+  }
+
+  // Each power row is one spec: how to read a team's cell from its row and the other team's.
+  function powerSpecs(league) {
+    const par = league.par_power || 50;
+    const ranked = league.teams_ranked || 0;
+    const perGame = league.goals_per_game || 0;
+    const minGames = state.power?.min_games || 2;
+    const expected = (attack, defence) => {
+      if (attack === null || attack === undefined || defence === null || defence === undefined || !perGame) return null;
+      return perGame * (Math.max(0, attack) / par) * (par / Math.max(1, defence));
+    };
+    const edge = (mine, theirs) => {
+      if (mine === null || theirs === null) return "";
+      if (mine - theirs >= XG_EDGE) return "up";
+      if (theirs - mine >= XG_EDGE) return "down";
+      return "";
+    };
+    const unranked = `unranked until ${minGames} games`;
+    return [
+      {
+        label: "Offence",
+        help: `Offence power: xG created, shots on goal, unblocked attempts and goals per game against the league, ranked of ${ranked}. ${par} = league average; higher creates more.`,
+        cell: (row) => ({
+          num: row.offense_power,
+          sub: `${rankText(row.offense_rank, ranked)} · ${fmtNum(row.goals_per_game)} g · ${fmtNum(row.xg_per_game)} xG`,
+          tone: row.potent ? "up" : "down",
+          title: `${row.abbr}: offence power ${row.offense_power} (${row.potent ? "potent" : "blunt"}) — ${fmtNum(row.goals_per_game)} goals, ${fmtNum(row.xg_per_game)} xG, ${fmtNum(row.sog_per_game, 1)} shots on goal and ${fmtNum(row.attempts_per_game, 1)} unblocked attempts per game over ${plural(row.games, "game")} · league ${fmtNum(league.goals_per_game)} goals, ${fmtNum(league.xg_per_game)} xG, ${fmtNum(league.sog_per_game, 1)} on goal, ${fmtNum(league.attempts_per_game, 1)} attempts · ${row.offense_rank ? `#${row.offense_rank} of ${ranked}` : unranked} · scores ${row.clinical} goals per 100 xG`,
+        }),
+      },
+      {
+        label: "Defence",
+        help: `Defence power: the league's xG allowed per game over this team's, ranked of ${ranked}. ${par} = league average; higher allows fewer and worse chances.`,
+        cell: (row) => ({
+          num: row.defense_power,
+          sub: `${rankText(row.defense_rank, ranked)} · ${fmtNum(row.ga_per_game)} ga · ${fmtNum(row.xga_per_game)} xGA`,
+          tone: row.solid ? "up" : "down",
+          title: `${row.abbr}: defence power ${row.defense_power} (${row.solid ? "solid" : "leaky"}) — allows ${fmtNum(row.xga_per_game)} xG and ${fmtNum(row.ga_per_game)} goals per game over ${plural(row.games, "game")} · league ${fmtNum(league.xg_per_game)} xG · ${row.defense_rank ? `#${row.defense_rank} of ${ranked}` : unranked}`,
+        }),
+      },
+      {
+        label: "Expected chances",
+        help: `Expected goals from chance quality: the league's ${fmtNum(perGame)} goals per team-game × this team's offence power over ${par} × ${par} over the other team's defence power. Green when favoured by ${XG_EDGE} or more.`,
+        cell: (row, opp) => {
+          const mine = expected(row.offense_power, opp.defense_power);
+          const theirs = expected(opp.offense_power, row.defense_power);
+          return {
+            num: fmtNum(mine),
+            sub: `off ${row.offense_power} × def ${opp.defense_power}`,
+            tone: edge(mine, theirs),
+            title: `${row.abbr}: ${fmtNum(mine)} expected goals from chances — league ${fmtNum(perGame)} per team-game × ${row.abbr} offence ${row.offense_power} (${rankText(row.offense_rank, ranked)}) × ${opp.abbr} defence ${opp.defense_power} (${rankText(opp.defense_rank, ranked)})`,
+          };
+        },
+      },
+      {
+        label: "Expected results",
+        help: `Expected goals from results only: the league's ${fmtNum(perGame)} goals per team-game × this team's scoring power (goals per game over the league's) × ${par} over the other team's stopping power (the league's goals over what it allows).`,
+        cell: (row, opp) => {
+          const mine = expected(row.scoring_power, opp.stopping_power);
+          const theirs = expected(opp.scoring_power, row.stopping_power);
+          return {
+            num: fmtNum(mine),
+            sub: `score ${row.scoring_power} × stop ${opp.stopping_power}`,
+            tone: edge(mine, theirs),
+            title: `${row.abbr}: ${fmtNum(mine)} expected goals from results — league ${fmtNum(perGame)} per team-game × ${row.abbr} scoring ${row.scoring_power} (${rankText(row.scoring_rank, ranked)}) × ${opp.abbr} stopping ${opp.stopping_power} (${rankText(opp.stopping_rank, ranked)})`,
+          };
+        },
+      },
+      {
+        label: "PP goals",
+        help: `Power-play goals out of all the goals this team has scored, then its conversion: goals for opportunities, ranked of ${ranked}. League converts ${fmtNum(league.pp_pct, 1)}% and scores ${fmtNum(league.pp_share, 0)}% of its goals on the power play.`,
+        cell: (row) => {
+          const pp = row.pp || {};
+          const pct = pp.pct;
+          const leaguePct = league.pp_pct;
+          const tone = pct === null || pct === undefined || !leaguePct ? "" : pct - leaguePct >= 3 ? "up" : leaguePct - pct >= 3 ? "down" : "";
+          return {
+            num: pp.games ? `${pp.goals}/${pp.of_goals}` : "–",
+            sub: pp.games ? `${pp.share === null ? "–" : `${pp.share}%`} of goals · ${pp.goals} for ${pp.opps} · ${fmtNum(pct, 1)}% ${rankText(pp.rank, ranked)}` : "no box scores",
+            tone,
+            title: `${row.abbr}: ${pp.goals} of its ${pp.of_goals} goals came on the power play (${pp.share === null ? "–" : `${pp.share}%`}) · ${pp.goals} for ${pp.opps} opportunities, ${fmtNum(pct, 1)}% (${rankText(pp.rank, ranked)}) · league ${fmtNum(leaguePct, 1)}%${pp.sh_goals ? ` · ${plural(pp.sh_goals, "shorthanded goal")} scored` : ""}`,
+          };
+        },
+      },
+      {
+        label: "PK allowed",
+        help: `Power-play goals allowed while shorthanded, how often this team was shorthanded, and the kill rate, ranked of ${ranked}. League kills ${fmtNum(100 - (league.pp_pct || 0), 1)}%.`,
+        cell: (row) => {
+          const pk = row.pk || {};
+          const pct = pk.pct;
+          const leaguePct = league.pp_pct ? 100 - league.pp_pct : null;
+          const tone = pct === null || pct === undefined || !leaguePct ? "" : pct - leaguePct >= 3 ? "up" : leaguePct - pct >= 3 ? "down" : "";
+          return {
+            num: pk.games ? String(pk.allowed) : "–",
+            sub: pk.games ? `${plural(pk.times_short, "kill")} · ${fmtNum(pct, 1)}% killed ${rankText(pk.rank, ranked)}` : "no box scores",
+            tone,
+            title: `${row.abbr}: allowed ${plural(pk.allowed, "power-play goal")} in ${plural(pk.times_short, "penalty kill")} — ${fmtNum(pct, 1)}% killed (${rankText(pk.rank, ranked)}) · ${pk.share === null ? "" : `${pk.share}% of the ${pk.of_goals} goals it has allowed · `}league ${fmtNum(leaguePct, 1)}%${pk.sh_goals_allowed ? ` · ${plural(pk.sh_goals_allowed, "shorthanded goal")} allowed` : ""}`,
+          };
+        },
+      },
+    ];
+  }
+
+  function powerCell(team, row, opp, spec) {
+    if (!row || !opp) {
+      return `<span class="spg-cell none" title="${esc(`${team.abbr}: no finished games this season yet`)}"><b>–</b><small>no games</small></span>`;
+    }
+    const cell = spec.cell(row, opp);
+    return `<span class="spg-cell ${cell.tone || ""}" title="${esc(cell.title)}"><b>${esc(String(cell.num))}</b><small>${esc(cell.sub)}</small></span>`;
+  }
+
+  function powerHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const league = board.league || {};
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    const seasonLabel = board.season_kind === "preseason" ? "preseason" : "season";
+    const key = `${league.par_power || 50} = league · ${plural(board.games || 0, `${seasonLabel} game`)}`;
+    const body = powerSpecs(league)
+      .map(
+        (spec) => `
+          ${powerCell(game.away, rows.away, rows.home, spec)}
+          <span class="pwr-label" title="${esc(spec.help)}">${esc(spec.label)}</span>
+          ${powerCell(game.home, rows.home, rows.away, spec)}`,
+      )
+      .join("");
+    return `
+      <section class="pwr" aria-label="Offence and defence power, expected goals, and special teams">
+        <div class="spg-head">
+          <span class="spg-label">Power</span>
+          <span class="spg-key" title="${esc(board.model || "")}">${esc(key)}</span>
+        </div>
+        <div class="pwr-grid">
+          <span class="pwr-team" style="color:${teamColor(game.away)}">${esc(game.away.abbr)}</span>
+          <span></span>
+          <span class="pwr-team" style="color:${teamColor(game.home)}">${esc(game.home.abbr)}</span>
+          ${body}
+        </div>
+      </section>`;
+  }
+
+  // ------------------------------------------------------ Goals by line
+
+  const UNIT_NAMES = { line: ["L1", "L2", "L3", "L4"], pair: ["D1", "D2", "D3"] };
+
+  function unitBar(team, units, kind, verb) {
+    const total = units?.total || 0;
+    const counts = units?.[kind] || [];
+    const none = units?.[`${kind}_none`] || 0;
+    if (!total) {
+      return `<span class="gbl-bar empty" title="${esc(`${team.abbr}: no goals ${verb} in games with a shift chart yet`)}"><small>–</small></span>`;
+    }
+    const names = UNIT_NAMES[kind];
+    const word = kind === "line" ? "line" : "pair";
+    const segs = counts
+      .map((n, i) => ({ n, i, label: names[i] }))
+      .concat(none ? [{ n: none, i: -1, label: "other" }] : [])
+      .filter((s) => s.n > 0)
+      .map((s) => {
+        const pct = (100 * s.n) / total;
+        const cls = s.i < 0 ? "none" : `u${s.i + 1}`;
+        const title = s.i < 0 ? `${team.abbr}: ${plural(s.n, "goal")} ${verb} with no ${word} member on the ice (${Math.round(pct)}%)` : `${team.abbr}: ${s.n} of ${total} goals ${verb} with ${s.label} on the ice (${Math.round(pct)}%)`;
+        const text = pct >= 14 ? `${Math.round(pct)}%` : pct >= 8 ? s.label : "";
+        return `<i class="gbl-seg ${cls}" style="width:${pct.toFixed(2)}%" title="${esc(title)}"><span>${esc(text)}</span></i>`;
+      })
+      .join("");
+    return `<span class="gbl-bar" role="img" aria-label="${esc(`${team.abbr} goals ${verb} by ${word}`)}">${segs}</span>`;
+  }
+
+  function linesTeamHtml(team, row) {
+    const lines = row?.lines;
+    const games = lines?.games || 0;
+    const note = games ? `${plural(games, "game")} with shift charts` : "waiting on NHL shift charts";
+    return `
+      <div class="gbl-team" style="--team:${teamColor(team)}">
+        <span class="gbl-name" title="${esc(`${team.abbr}: ${note}`)}">${esc(team.abbr)}<small>${esc(games ? `${games} gp` : "…")}</small></span>
+        <span class="gbl-k" title="Which forward line this team's goals came from">Scored</span>${unitBar(team, lines?.scored, "line", "scored")}
+        <span class="gbl-k" title="Which forward line was on the ice for the goals this team allowed">Allowed</span>${unitBar(team, lines?.allowed, "line", "allowed")}
+        <span class="gbl-k" title="Which defence pair was on the ice for this team's goals">D scored</span>${unitBar(team, lines?.scored, "pair", "scored")}
+        <span class="gbl-k" title="Which defence pair was on the ice for the goals this team allowed">D allowed</span>${unitBar(team, lines?.allowed, "pair", "allowed")}
+      </div>`;
+  }
+
+  function linesHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    if (!rows.away && !rows.home) return "";
+    const league = board.league?.lines;
+    const leaguePct = league?.scored?.line_pct || [];
+    const leagueKey = league?.games ? `NHL ${leaguePct.map((p, i) => `${UNIT_NAMES.line[i]} ${p === null ? "–" : `${Math.round(p)}%`}`).join(" · ")}` : "";
+    const legend = ["L1 / D1", "L2 / D2", "L3 / D3", "L4"].map((label, i) => `<span><i class="gbl-seg u${i + 1}"></i>${esc(label)}</span>`).join("") + `<span><i class="gbl-seg none"></i>other</span>`;
+    return `
+      <section class="gbl" aria-label="Where each team's goals come from and which lines allow them">
+        <div class="spg-head">
+          <span class="spg-label">Goals by line</span>
+          <span class="spg-key" title="${esc(`${board.lines_note || ""} The NHL has posted shift charts for ${league?.games || 0} of the ${board.games || 0} finals this season.`)}">share of goals · <small>${esc(`${league?.games || 0}/${board.games || 0} games charted`)}</small></span>
+        </div>
+        ${linesTeamHtml(game.away, rows.away)}
+        ${linesTeamHtml(game.home, rows.home)}
+        <div class="gbl-legend" title="${esc(leagueKey ? `League share of goals scored by line: ${leagueKey.slice(4)}` : "")}">${legend}${leagueKey ? `<em>${esc(leagueKey)}</em>` : ""}</div>
+      </section>`;
+  }
+
+  // ------------------------------------------- First-period shots → goals
+
+  const P1_EDGE = 0.5;
+
+  function p1Bucket(buckets, sog) {
+    return buckets.findIndex((b) => sog >= b.low && (b.high === null || b.high === undefined || sog <= b.high));
+  }
+
+  // The team's first-period shots on goal tonight, once the first period is over.
+  function p1Tonight(game, side) {
+    if (game.state === "pre") return null;
+    const firstOver = game.period > 1 || game.state === "post" || (game.period === 1 && /^0?0:00(\.0+)?$/.test(String(game.clock || "")));
+    if (!firstOver) return null;
+    const first = (game.period_shots || []).find((row) => row.period === 1);
+    return first ? first[`${side}_sog`] ?? null : null;
+  }
+
+  function p1Cell(team, bucket, baseline, tonight) {
+    const live = tonight !== null && tonight !== undefined && tonight >= bucket.low && (bucket.high === null || tonight <= bucket.high);
+    const now = live ? " now" : "";
+    if (!bucket.games) {
+      const title = `${team.abbr}: no games yet with ${bucket.label} shots on goal in the 1st${live ? ` · tonight: ${tonight} in the 1st` : ""}`;
+      return `<span class="spg-cell none${now}" title="${esc(title)}"><b>–</b><small>0 gp</small></span>`;
+    }
+    const tone = baseline === null || baseline === undefined ? "" : bucket.avg - baseline >= P1_EDGE ? "up" : baseline - bucket.avg >= P1_EDGE ? "down" : "";
+    const title = `${team.abbr}: in ${plural(bucket.games, "game")} with ${bucket.label} shots on goal in the 1st period it finished with ${plural(bucket.goals, "goal")} — ${fmtNum(bucket.avg)} per game${baseline !== null && baseline !== undefined ? ` against its ${fmtNum(baseline)} average` : ""} · won ${bucket.wins}${live ? ` · tonight: ${tonight} on goal in the 1st` : ""}`;
+    return `<span class="spg-cell ${tone}${now}" title="${esc(title)}"><b>${fmtNum(bucket.avg)}</b><small>${esc(`${bucket.games} gp · ${bucket.wins}W`)}</small></span>`;
+  }
+
+  function p1Row(team, fp, game, side) {
+    const buckets = fp?.buckets || [];
+    const tonight = game ? p1Tonight(game, side) : null;
+    const label = `<span class="spg-name" style="color:${team.league ? "var(--muted)" : teamColor(team)}" title="${esc(`${team.abbr}: ${plural(fp?.games || 0, "game")} with a first-period shot count · ${fmtNum(fp?.goals_per_game)} goals per game`)}">${esc(team.abbr)}</span>`;
+    if (!buckets.length) {
+      return `${label}<span class="spg-cell none p1b-span"><small>no finished games yet</small></span>`;
+    }
+    return label + buckets.map((b) => p1Cell(team, b, fp.goals_per_game, tonight)).join("");
+  }
+
+  function firstPeriodHtml(game) {
+    const board = state.power;
+    if (!board || !board.teams || !Object.keys(board.teams).length) return "";
+    const rows = { away: board.teams[game.away.id], home: board.teams[game.home.id] };
+    const leagueFp = board.league?.first_period;
+    if (!rows.away && !rows.home && !leagueFp?.games) return "";
+    const buckets = (leagueFp?.buckets || rows.away?.first_period?.buckets || rows.home?.first_period?.buckets || []).map((b) => b.label);
+    const head = buckets.map((label) => `<span class="spg-h" title="${esc(`${label} shots on goal in the 1st period`)}">${esc(label)}</span>`).join("");
+    const nhl = { abbr: "NHL", league: true };
+    return `
+      <section class="p1b" aria-label="Goals in the game by first-period shots on goal">
+        <div class="spg-head">
+          <span class="spg-label">1st-period shots → goals</span>
+          <span class="spg-key" title="Each team's finished games sorted by its shots on goal in the first period, and how many goals it ended the game with. Green when that bucket runs half a goal above the team's average, amber when half a goal below. The outlined cell is tonight's first period.">goals in game · <small>avg · gp · wins</small></span>
+        </div>
+        <div class="p1b-grid" style="grid-template-columns: 2.6rem repeat(${Math.max(1, buckets.length)}, minmax(0, 1fr))">
+          <span class="spg-h p1b-sog">1st SOG</span>${head}
+          ${p1Row(game.away, rows.away?.first_period, game, "away")}
+          ${p1Row(game.home, rows.home?.first_period, game, "home")}
+          ${leagueFp?.games ? p1Row(nhl, leagueFp, null, "") : ""}
+        </div>
+      </section>`;
+  }
+
   function fmtFormDate(iso) {
     if (!iso) return "";
     const d = new Date(iso);
@@ -820,7 +1128,7 @@
     const lp = s?.last_play;
     const pp = s?.power_play ? " power-play" : "";
     const showShots = game.state !== "pre";
-    const core = showShots ? statRow("On goal", "shots", game) : "";
+    const core = showShots ? statRow("On goal", "shots", game) + xgRow(game) : "";
     const more = expanded
       ? [
           statRow("Hits", "hits", game),
@@ -901,6 +1209,9 @@
         ${periodShots(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${shotsPerGoalHtml(game)}
+        ${powerHtml(game)}
+        ${linesHtml(game)}
+        ${firstPeriodHtml(game)}
         ${goalLog(game)}
         ${lastFiveHtml(game)}
         ${expanded && goalies ? `<div class="goalies">${goalies}</div>` : ""}
@@ -1648,5 +1959,6 @@
   loadLive();
   loadPeriods();
   loadShots();
+  loadPower();
   scheduleLive();
 })();

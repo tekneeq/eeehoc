@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from eeehoc.form import FormFeed
 from eeehoc.live import DATE_RE, LiveFeed
 from eeehoc.periods import PeriodFeed
+from eeehoc.power import PowerFeed
 from eeehoc.shots import ShotsFeed
 from eeehoc.winprob import WinProbService, day_view
 
@@ -29,12 +30,14 @@ class DashboardState:
         form: FormFeed | None = None,
         winprob: WinProbService | None = None,
         shots: ShotsFeed | None = None,
+        power: PowerFeed | None = None,
     ) -> None:
         self.live = live or LiveFeed()
         self.periods = periods or PeriodFeed()
         self.form = form or FormFeed()
         self.winprob = winprob or WinProbService()
         self.shots = shots or ShotsFeed()
+        self.power = power or PowerFeed()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -119,6 +122,14 @@ def make_handler(state: DashboardState):
             if path == "/api/shots":
                 try:
                     board = state.shots.get()
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc), "teams": {}}), "application/json")
+                return self._send(200, _json_bytes(board), "application/json")
+
+            if path == "/api/power":
+                wait = (qs.get("wait") or ["0"])[0] in ("1", "true")
+                try:
+                    board = state.power.get(wait=wait)
                 except Exception as exc:  # noqa: BLE001
                     return self._send(502, _json_bytes({"error": str(exc), "teams": {}}), "application/json")
                 return self._send(200, _json_bytes(board), "application/json")

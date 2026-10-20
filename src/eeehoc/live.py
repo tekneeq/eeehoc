@@ -12,6 +12,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from eeehoc.xg import game_xg
+
 SCOREBOARD_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"
 SUMMARY_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/summary?event={event_id}"
 ATHLETE_URL = "https://site.web.api.espn.com/apis/common/v3/sports/hockey/nhl/athletes/{athlete_id}"
@@ -692,6 +694,7 @@ def normalize_event(event: dict[str, Any], *, ot_seconds: int = 300, playoffs: b
         "situation": None,
         "goals": [],
         "period_shots": [],
+        "xg": None,
         "stars": _stars(status, home["id"], away["id"]),
     }
     if state in ("in", "post"):
@@ -876,8 +879,10 @@ def apply_summary(game: dict[str, Any], summary: dict[str, Any]) -> None:
             periods=_periods_played(game),
             playoffs=bool(game.get("playoffs")),
         )
+        game["xg"] = game_xg(plays, home_id, away_id, playoffs=bool(game.get("playoffs")))
     else:
         game["period_shots"] = []
+        game["xg"] = None
 
     if not game["stars"]:
         header_comp = ((summary.get("header") or {}).get("competitions") or [{}])[0]
