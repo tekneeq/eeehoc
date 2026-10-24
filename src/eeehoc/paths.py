@@ -167,8 +167,17 @@ def _lens(
     score: tuple[int, int],
     team_id: str | None,
     live_next: tuple[int, int] | None,
+    path: list[tuple[int, int]] | None = None,
 ) -> dict[str, Any]:
-    """What followed ``score`` after ``after`` periods — for one club (for–against) or the league (home–away)."""
+    """What followed ``score`` after ``after`` periods — for one club (for–against) or the league (home–away).
+
+    With ``path`` (the score after each completed period) only games that went
+    through the same scores period by period count; otherwise any game at
+    ``score`` after ``after`` periods does, however it got there.
+    """
+    steps = list(path) if path else [score]
+    if len(steps) != after and after:
+        steps = [score]
     n = 0
     wins = losses = 0
     ends = {"REG": 0, "OT": 0, "SO": 0}
@@ -190,6 +199,15 @@ def _lens(
         state = (a, h) if flip else (h, a)
         if state != score:
             continue
+        if len(steps) > 1:
+            same_route = True
+            for index, want in enumerate(steps[:-1]):
+                ph, pa = score_after(g, index + 1)
+                if ((pa, ph) if flip else (ph, pa)) != want:
+                    same_route = False
+                    break
+            if not same_route:
+                continue
         n += 1
         fh, fa = g["home_score"], g["away_score"]
         final = (fa, fh) if flip else (fh, fa)
@@ -283,8 +301,10 @@ def game_state(game: dict[str, Any]) -> dict[str, Any]:
         else:
             remaining = PERIOD_SECONDS if clock is None else max(0.0, min(float(PERIOD_SECONDS), clock))
             elapsed = int((period - 1) * PERIOD_SECONDS + (PERIOD_SECONDS - remaining))
+    path: list[tuple[int, int]] = []
     if completed and len(home_lines) >= completed and len(away_lines) >= completed:
         score = (sum(home_lines[:completed]), sum(away_lines[:completed]))
+        path = [(sum(home_lines[:p]), sum(away_lines[:p])) for p in range(1, completed + 1)]
     elif completed == REGULATION and state == "post" and str(game.get("status_detail") or "").split("/")[-1] in ("OT", "SO"):
         # No linescores: a game decided past regulation was tied after three.
         tied = min(live_home, live_away)
@@ -301,6 +321,8 @@ def game_state(game: dict[str, Any]) -> dict[str, Any]:
         "period": period,
         "completed": completed,
         "score": score,
+        # Score after each completed period; empty when the linescores are missing (state only).
+        "path": path,
         "live_score": (live_home, live_away),
         "elapsed": elapsed,
         "remaining": max(0, REGULATION_SECONDS - elapsed),
@@ -466,11 +488,19 @@ def build_paths(
     away_id = str((game.get("away") or {}).get("id") or "")
     hs, as_ = live["live_score"]
     live_next = (hs, as_) if live["next_period_started"] else None
-    lenses = {
-        "home": _lens(games, after=after, score=score, team_id=home_id, live_next=live_next),
-        "away": _lens(games, after=after, score=(score[1], score[0]), team_id=away_id, live_next=(as_, hs) if live_next else None),
-        "league": _lens(games, after=after, score=score, team_id=None, live_next=live_next),
-    }
+    path = live["path"]
+    exact = len(path) == after and after > 1
+
+    def views(route: list[tuple[int, int]] | None) -> dict[str, Any]:
+        away_route = [(a, h) for h, a in route] if route else None
+        return {
+            "home": _lens(games, after=after, score=score, team_id=home_id, live_next=live_next, path=route),
+            "away": _lens(games, after=after, score=(score[1], score[0]), team_id=away_id, live_next=(as_, hs) if live_next else None, path=away_route),
+            "league": _lens(games, after=after, score=score, team_id=None, live_next=live_next, path=route),
+        }
+
+    lenses = views(path if exact else None)
+    any_way = views(None) if exact else None
     years = sorted({g["season_year"] for g in games if g["season_year"]})
     shots_60, save_pct = league_rates(games, season_year or (years[-1] if years else 0))
     model = rest_of_game(game, live, power=power, league_shots=shots_60, league_save_pct=save_pct)
@@ -484,9 +514,13 @@ def build_paths(
         "next_period_done": live["next_period_done"],
         "elapsed_sec": live["elapsed"],
         "remaining_sec": live["remaining"],
+        # Default lenses follow the exact path of period scores; ``any`` is the state-only view.
+        "path": [_key(h, a) for h, a in path],
+        "exact": exact,
         "home": {"id": home_id, "abbr": str((game.get("home") or {}).get("abbr") or ""), **lenses["home"]},
         "away": {"id": away_id, "abbr": str((game.get("away") or {}).get("abbr") or ""), **lenses["away"]},
         "league": lenses["league"],
+        "any": None if any_way is None else {"home": any_way["home"], "away": any_way["away"], "league": any_way["league"]},
         "model": model,
         "games": len(games),
         "seasons": [f"{y - 1}-{str(y)[-2:]}" for y in years],

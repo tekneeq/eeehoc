@@ -6,6 +6,7 @@
     formLoading: new Set(),
     paths: {},
     pathsLoading: new Set(),
+    pathsAnyWay: new Set(),
     shots: null,
     power: null,
     tab: "live",
@@ -1186,7 +1187,9 @@
   function pathsLensHtml(name, color, lens, data, kind) {
     const n = lens.count || 0;
     const seasons = (data.seasons || []).length;
-    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
+    const anyWay = Boolean(data.exact && state.pathsAnyWay.has(data.game));
+    const route = (data.path || []).join(" → ");
+    const stateWord = data.after ? (data.exact && !anyWay ? `${route} (same score after every period)` : `${data.score} after the ${PERIOD_WORD[data.after]}`) : "from puck drop";
     const who = kind === "league" ? "every NHL game" : `${name}'s games`;
     const persp = kind === "league" ? `NHL (home–away ${data.score})` : `${name} (for–against ${kind === "home" ? data.score : data.score.split("-").reverse().join("-")})`;
     const winLabel = kind === "league" ? "H" : "W";
@@ -1236,8 +1239,17 @@
     if (data.error && !data.league) {
       return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${esc(data.error)}</span></div>`);
     }
-    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "puck drop";
+    const anyWay = Boolean(data.exact && state.pathsAnyWay.has(game.id));
+    const lenses = anyWay && data.any ? data.any : data;
+    const route = (data.path || []).join(" → ");
+    const stateWord = data.after ? (data.exact && !anyWay ? `${route} after the ${PERIOD_WORD[data.after]}` : `${data.score} after the ${PERIOD_WORD[data.after]}`) : "puck drop";
     const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
+    const toggle = data.exact
+      ? `<span class="pth-mode">
+           <button type="button" class="mini${anyWay ? "" : " active"}" data-act="paths-exact" title="${esc(`Only games that went ${route}: the same score after every period so far`)}">same path</button>
+           <button type="button" class="mini${anyWay ? " active" : ""}" data-act="paths-any" title="${esc(`Every game that was ${data.score} after the ${PERIOD_WORD[data.after]}, however it got there`)}">any way</button>
+         </span>`
+      : "";
     const key = data.complete === false ? `${(data.games || 0).toLocaleString("en-US")} finals · adding older seasons…` : `${(data.games || 0).toLocaleString("en-US")} finals · ${plural((data.seasons || []).length, "season")}`;
     const liveNote = data.live_branch ? `<span class="pth-live-note">${data.next_period_done ? "took" : "so far"} <b>${esc(data.live_score)}</b></span>` : "";
     return wrap(`
@@ -1250,9 +1262,10 @@
           <span class="pth-h">result</span>
           <span class="pth-h">${esc(nextWord)} ${liveNote}</span>
         </div>
-        ${pathsLensHtml(game.away.abbr, teamColor(game.away), data.away, data, "away")}
-        ${pathsLensHtml(game.home.abbr, teamColor(game.home), data.home, data, "home")}
-        ${pathsLensHtml("NHL", "var(--muted)", data.league, data, "league")}
+        ${pathsLensHtml(game.away.abbr, teamColor(game.away), lenses.away, data, "away")}
+        ${pathsLensHtml(game.home.abbr, teamColor(game.home), lenses.home, data, "home")}
+        ${pathsLensHtml("NHL", "var(--muted)", lenses.league, data, "league")}
+        ${toggle}
         ${pathsModelHtml(game, data)}`);
   }
 
@@ -1774,6 +1787,13 @@
       if (state.expanded.has(id)) state.expanded.delete(id);
       else state.expanded.add(id);
       card.outerHTML = chicletHtml(game);
+      return;
+    }
+    if (act === "paths-exact" || act === "paths-any") {
+      if (act === "paths-any") state.pathsAnyWay.add(id);
+      else state.pathsAnyWay.delete(id);
+      const section = btn.closest(".pth");
+      if (section) section.outerHTML = pathsHtml(game);
     }
   }
 

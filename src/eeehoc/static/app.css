@@ -1040,6 +1040,23 @@ body.chiclet-dragging {
   color: var(--muted);
 }
 
+.pth-mode {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+.pth-mode .mini {
+  font-size: 0.56rem;
+  padding: 0.12rem 0.5rem;
+  font-family: var(--mono);
+}
+
+.pth-mode .mini.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .pth-model {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 6.2rem minmax(0, 1fr);
