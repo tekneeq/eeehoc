@@ -1277,8 +1277,16 @@ body.chiclet-dragging {
   text-transform: uppercase;
 }
 
+.p1b-grid .spg-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
 .p1b-grid .spg-cell small {
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  font-size: 0.48rem;
 }
 
 .p1b-span {
