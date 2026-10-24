@@ -159,6 +159,35 @@ def test_build_paths_three_lenses_with_the_live_branch_marked():
     assert any(b["live"] and b["score"] == "2-1" for b in nhl["branches"])
 
 
+def test_build_paths_follows_the_exact_route_of_period_scores_with_an_any_way_view():
+    extra = [
+        # 1-1 after the 1st, then 1-3 after the 2nd (CHI home, MTL away) — the same route as the live game
+        _event("x1", "2026-10-09T23:00Z", CHI, MTL, [1, 0, 1], [1, 2, 1]),
+        # 1-3 after the 2nd by another route: 0-2 after the 1st
+        _event("x2", "2026-10-11T23:00Z", CHI, BOS, [0, 1, 2], [2, 1, 0]),
+        # 1-3 after the 2nd via 1-1 again, league only (BOS home)
+        _event("x3", "2026-10-13T23:00Z", BOS, MTL, [1, 0, 0], [1, 2, 0]),
+    ]
+    games = parse_month({"events": _history() + extra})
+    live = _live(3, "15:00", 1, 3, [1, 0, 0], [1, 2, 0])  # CHI home 1, MTL away 3; 1-1 → 1-3
+    out = build_paths(games, live, season_year=2027)
+    assert out["after"] == 2 and out["score"] == "1-3" and out["path"] == ["1-1", "1-3"] and out["exact"] is True
+
+    # Exact route (default): e, x1 and x3 went 1-1 → 1-3; x2 (0-2 → 1-3) did not
+    assert out["league"]["count"] == 3 and {b["score"] for b in out["league"]["branches"]} == {"1-4", "2-4", "1-3"}
+    assert out["home"]["count"] == 1  # CHI at home only in x1 (for–against 1-1 → 1-3), lost 2-4
+    assert out["home"]["loss_pct"] == 100.0
+    assert out["away"]["count"] == 2  # MTL in x1 and x3, both for–against 1-1 → 3-1, both won
+    assert out["away"]["win_pct"] == 100.0
+
+    # Any way: everything that was 1-3 after the 2nd, however it got there
+    assert out["any"]["league"]["count"] == 4 and out["any"]["home"]["count"] == 2 and out["any"]["away"]["count"] == 2
+
+    # After the 1st only, the route and the state are the same thing: no second view
+    one = build_paths(games, _live(2, "12:00", 1, 1, [1, 0], [1, 0]), season_year=2027)
+    assert one["exact"] is False and one["any"] is None and one["path"] == ["1-1"]
+
+
 def test_build_paths_at_the_end_of_regulation_shows_how_tied_games_ended():
     games = parse_month({"events": _history()})
     out = build_paths(games, _live(4, "3:21", 2, 2, [1, 1, 0], [1, 0, 1]), season_year=2027)
