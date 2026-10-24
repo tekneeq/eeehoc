@@ -1139,15 +1139,16 @@
     if (!game || !game.home?.id || !game.away?.id || state.pathsLoading.has(game.id)) return;
     const sig = pathsSignature(game);
     const have = state.paths[game.id];
-    if (have && have.sig === sig && Date.now() - have.at < PATHS_REFRESH_MS) return;
-    if (have && have.data?.loading && Date.now() - have.at < 4000) return;
+    const settling = have?.data?.loading || have?.data?.complete === false;
+    // Poll quickly while the history is still loading; otherwise only when the game moves or a minute has passed.
+    if (have && Date.now() - have.at < (settling ? 4000 : have.sig === sig ? PATHS_REFRESH_MS : 0)) return;
     state.pathsLoading.add(game.id);
     try {
       const res = await fetch(`/api/paths?game=${encodeURIComponent(game.id)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       state.paths[game.id] = { sig, at: Date.now(), data };
-      if (data.loading) setTimeout(() => loadPaths(game), 4000);
+      if (data.loading || data.complete === false) setTimeout(() => loadPaths(game), 4000);
     } catch (err) {
       state.paths[game.id] = { sig, at: Date.now(), data: { error: err.message || String(err) } };
     } finally {
@@ -1229,14 +1230,15 @@
     const data = entry?.data;
     const wrap = (inner) => `<section class="pth" data-paths-for="${esc(game.id)}" aria-label="Where games go from this score after this period">${inner}</section>`;
     if (!data || data.loading) {
-      return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${data?.error ? esc(data.error) : "loading three seasons of finals…"}</span></div>`);
+      const progress = data?.months_total ? ` ${data.months_done}/${data.months_total} months` : "";
+      return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${data?.error ? esc(data.error) : `loading finals…${esc(progress)}`}</span></div>`);
     }
     if (data.error && !data.league) {
       return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${esc(data.error)}</span></div>`);
     }
     const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "puck drop";
     const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
-    const key = `${(data.games || 0).toLocaleString("en-US")} finals · ${plural((data.seasons || []).length, "season")}`;
+    const key = data.complete === false ? `${(data.games || 0).toLocaleString("en-US")} finals · adding older seasons…` : `${(data.games || 0).toLocaleString("en-US")} finals · ${plural((data.seasons || []).length, "season")}`;
     const liveNote = data.live_branch ? `<span class="pth-live-note">${data.next_period_done ? "took" : "so far"} <b>${esc(data.live_score)}</b></span>` : "";
     return wrap(`
         <div class="spg-head">

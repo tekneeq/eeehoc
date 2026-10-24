@@ -23,11 +23,14 @@ chance of each side winning or of overtime.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from eeehoc.live import PLAYOFF_TYPE, SCOREBOARD_URL, FetchJson, _int, fetch_json
@@ -55,6 +58,7 @@ POISSON_MAX = 10
 CURRENT_MONTH_TTL = 90.0
 PAST_MONTH_TTL = 6 * 60 * 60.0
 HISTORY_TTL = 60.0
+CACHE_VERSION = 1
 
 MODEL_NOTE = (
     "Rest-of-game model: each side's shots on goal per 60 (season rate, blended with tonight's pace as "
@@ -489,28 +493,71 @@ def build_paths(
 
 
 class PathsFeed:
-    """Finals from the last few seasons, loaded in the background, and the tree for any live game."""
+    """Finals from the last few seasons, loaded in the background, and the tree for any live game.
 
-    def __init__(self, fetch: FetchJson = fetch_json, *, workers: int = 6) -> None:
+    The current season is fetched first and served straight away; older seasons
+    are added behind it. Months that are over are parsed once and kept on disk
+    (``EEEHOC_CACHE_DIR``, default ``~/.cache/eeehoc``), so a restart serves the
+    whole history without going back to ESPN for it.
+    """
+
+    def __init__(self, fetch: FetchJson = fetch_json, *, workers: int = 6, cache_dir: Path | str | None = None) -> None:
         self._fetch = fetch
         self._workers = max(1, workers)
         self._lock = threading.Lock()
         self._months: dict[str, tuple[float, list[dict[str, Any]]]] = {}
-        self._history: tuple[float, date, int, list[dict[str, Any]]] | None = None
+        self._history: tuple[float, date, int, list[dict[str, Any]], bool] | None = None
+        self._progress: tuple[int, int] = (0, 0)
         self._worker: threading.Thread | None = None
         self._last_error: str | None = None
+        root = cache_dir if cache_dir is not None else os.environ.get("EEEHOC_CACHE_DIR") or Path.home() / ".cache" / "eeehoc"
+        self._cache_dir = Path(root) / "paths"
 
     @property
     def last_error(self) -> str | None:
         return self._last_error
+
+    @property
+    def progress(self) -> tuple[int, int]:
+        return self._progress
+
+    def _disk_path(self, ym: str) -> Path:
+        return self._cache_dir / f"{ym}.json"
+
+    def _read_disk(self, ym: str) -> list[dict[str, Any]] | None:
+        try:
+            raw = json.loads(self._disk_path(ym).read_text("utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(raw, dict) or raw.get("version") != CACHE_VERSION or not isinstance(raw.get("games"), list):
+            return None
+        games = raw["games"]
+        for g in games:
+            g["periods"] = [tuple(p) for p in g.get("periods") or []]
+        return games
+
+    def _write_disk(self, ym: str, games: list[dict[str, Any]]) -> None:
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp = self._disk_path(ym).with_suffix(".tmp")
+            tmp.write_text(json.dumps({"version": CACHE_VERSION, "month": ym, "games": games}), "utf-8")
+            tmp.replace(self._disk_path(ym))
+        except OSError as exc:
+            self._last_error = f"paths cache: {exc}"
 
     def _load_month(self, ym: str, now: float, today: date) -> list[dict[str, Any]]:
         current = ym >= f"{today.year}{today.month:02d}"
         ttl = CURRENT_MONTH_TTL if current else PAST_MONTH_TTL
         with self._lock:
             cached = self._months.get(ym)
-            if cached is not None and now - cached[0] < ttl:
-                return cached[1]
+        if cached is not None and now - cached[0] < ttl:
+            return cached[1]
+        if not current and cached is None:
+            kept = self._read_disk(ym)
+            if kept is not None:
+                with self._lock:
+                    self._months[ym] = (now, kept)
+                return kept
         try:
             payload = self._fetch(f"{SCOREBOARD_URL}?dates={ym}&limit=1000")
         except Exception as exc:  # noqa: BLE001 - keep the month we had
@@ -523,21 +570,19 @@ class PathsFeed:
         games = parse_month(payload) if isinstance(payload, dict) else []
         with self._lock:
             self._months[ym] = (now, games)
+        if not current:
+            self._write_disk(ym, games)
         return games
 
-    def refresh(self, *, today: date | None = None) -> list[dict[str, Any]]:
-        today = today or datetime.now(ET).date()
-        now = time.time()
+    def _season_year(self, today: date) -> int:
         try:
             year, _label, _start = _season_meta(self._fetch(SCOREBOARD_URL))
         except Exception as exc:  # noqa: BLE001
             self._last_error = str(exc)
             year = 0
-        if not year:
-            year = today.year + (1 if today.month >= 9 else 0)
-        months = _months(date(year - 1 - SEASONS_BACK, 9, 1), today)
-        with ThreadPoolExecutor(max_workers=min(self._workers, max(1, len(months)))) as pool:
-            batches = list(pool.map(lambda ym: self._load_month(ym, now, today), months))
+        return year or today.year + (1 if today.month >= 9 else 0)
+
+    def _publish(self, now: float, today: date, year: int, batches: list[list[dict[str, Any]]], *, complete: bool) -> list[dict[str, Any]]:
         seen: set[str] = set()
         games: list[dict[str, Any]] = []
         for batch in batches:
@@ -547,8 +592,39 @@ class PathsFeed:
                 seen.add(g["id"])
                 games.append(g)
         with self._lock:
-            self._history = (now, today, year, games)
+            self._history = (now, today, year, games, complete)
         return games
+
+    def refresh(self, *, today: date | None = None) -> list[dict[str, Any]]:
+        """Rebuild: this season first (served as soon as it lands), then the seasons behind it."""
+        today = today or datetime.now(ET).date()
+        now = time.time()
+        year = self._season_year(today)
+        recent = _months(date(year - 1, 9, 1), today)
+        older = _months(date(year - 1 - SEASONS_BACK, 9, 1), date(year - 1, 8, 31))
+        total = len(recent) + len(older)
+        done = 0
+        batches: list[list[dict[str, Any]]] = []
+
+        def load(months: list[str]) -> None:
+            nonlocal done
+            if not months:
+                return
+            with ThreadPoolExecutor(max_workers=min(self._workers, len(months))) as pool:
+                for batch in pool.map(lambda ym: self._load_month(ym, now, today), months):
+                    batches.append(batch)
+                    done += 1
+                    self._progress = (done, total)
+
+        self._progress = (0, total)
+        load(recent)
+        with self._lock:
+            first_load = self._history is None
+        # Serve this season on its own only on the first load; a later refresh keeps the full history up meanwhile.
+        if first_load or not older:
+            self._publish(now, today, year, batches, complete=not older)
+        load(older)
+        return self._publish(now, today, year, batches, complete=True)
 
     def _refresh_in_background(self, today: date) -> None:
         with self._lock:
@@ -563,30 +639,32 @@ class PathsFeed:
         except Exception as exc:  # noqa: BLE001
             self._last_error = str(exc)
 
-    def history(self, *, today: date | None = None, wait: bool = False) -> tuple[int, list[dict[str, Any]]] | None:
-        """``(season_year, finals)``; ``None`` while the first load is still running."""
+    def history(self, *, today: date | None = None, wait: bool = False) -> tuple[int, list[dict[str, Any]], bool] | None:
+        """``(season_year, finals, complete)``; ``None`` only while nothing at all has loaded yet."""
         today = today or datetime.now(ET).date()
         now = time.time()
         with self._lock:
             cached = self._history
-        fresh = cached is not None and cached[1] == today and now - cached[0] < HISTORY_TTL
+        fresh = cached is not None and cached[1] == today and cached[4] and now - cached[0] < HISTORY_TTL
         if fresh:
-            return cached[2], cached[3]
+            return cached[2], cached[3], True
         if wait:
             games = self.refresh(today=today)
             with self._lock:
                 year = self._history[2] if self._history else 0
-            return year, games
+            return year, games, True
         self._refresh_in_background(today)
         if cached is not None:
-            return cached[2], cached[3]
+            return cached[2], cached[3], cached[4]
         return None
 
     def for_game(self, game: dict[str, Any], *, power: dict[str, Any] | None = None, today: date | None = None, wait: bool = False) -> dict[str, Any]:
         found = self.history(today=today, wait=wait)
         if found is None:
-            return {"loading": True, "game": str(game.get("id") or ""), "error": self._last_error}
-        year, games = found
+            done, total = self._progress
+            return {"loading": True, "game": str(game.get("id") or ""), "months_done": done, "months_total": total, "error": self._last_error}
+        year, games, complete = found
         out = build_paths(games, game, power=power, season_year=year)
+        out["complete"] = complete
         out["error"] = self._last_error
         return out

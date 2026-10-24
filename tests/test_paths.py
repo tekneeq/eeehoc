@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.request
 from datetime import date
 from http.server import ThreadingHTTPServer
@@ -207,30 +208,67 @@ def _fetch_for(events):
         calls.append(url)
         if url == SCOREBOARD_URL:
             return {"leagues": [{"season": {"year": 2027, "displayName": "2026-27", "startDate": "2026-09-15T07:00Z"}}], "events": []}
-        if url.startswith(SCOREBOARD_URL) and "dates=202610" in url:
-            return {"events": events}
-        if url.startswith(SCOREBOARD_URL):
-            return {"events": []}
+        if url.startswith(SCOREBOARD_URL) and "dates=" in url:
+            ym = url.split("dates=")[1][:6]
+            return {"events": [e for e in events if e["date"][:7].replace("-", "") == ym]}
         raise AssertionError(url)
 
     return fetch, calls
 
 
-def test_feed_loads_in_the_background_then_serves_every_game():
+def test_feed_serves_this_season_first_then_fills_in_and_caches_past_months(tmp_path):
     fetch, calls = _fetch_for(_history())
-    feed = PathsFeed(fetch, workers=2)
+    feed = PathsFeed(fetch, workers=2, cache_dir=tmp_path)
     game = _live(1, "0:00", 1, 1, [1], [1])
     first = feed.for_game(game, today=TODAY)
-    assert first.get("loading") is True
+    assert first.get("loading") is True and "months_total" in first
     feed._worker.join(timeout=5)
     out = feed.for_game(game, today=TODAY)
-    assert out["after"] == 1 and out["league"]["count"] == 4 and out["games"] == 5
+    assert out["complete"] is True and out["after"] == 1 and out["league"]["count"] == 4 and out["games"] == 5
     months = [u for u in calls if "dates=" in u]
     assert len(months) == len(set(months))  # each month once
-    # Months from September two seasons back through today
     assert any("dates=202409" in u for u in months) and any("dates=202610" in u for u in months)
+    # Months that are over were written to disk; the current month was not
+    assert (tmp_path / "paths" / "202509.json").exists() and (tmp_path / "paths" / "202409.json").exists()
+    assert not (tmp_path / "paths" / "202610.json").exists()
     feed.for_game(game, today=TODAY)
-    assert len([u for u in calls if "dates=" in u]) == len(months)  # served from the cache
+    assert len([u for u in calls if "dates=" in u]) == len(months)  # served from memory
+
+    # A fresh process reads the finished months from disk and only asks ESPN for the current month
+    fetch2, calls2 = _fetch_for(_history())
+    again = PathsFeed(fetch2, workers=2, cache_dir=tmp_path)
+    again.refresh(today=TODAY)
+    assert [u for u in calls2 if "dates=" in u] == [f"{SCOREBOARD_URL}?dates=202610&limit=1000"]
+    assert again.for_game(game, today=TODAY)["league"]["count"] == 4  # game e came back from the 2025-11 file
+    assert again.for_game(game, today=TODAY)["games"] == 5
+
+
+def test_feed_publishes_the_current_season_before_the_older_ones_land():
+    import threading as _threading
+
+    gate = _threading.Event()
+    fetch, _calls = _fetch_for(_history())
+
+    def slow(url):
+        if "dates=2024" in url or "dates=2025" in url:
+            gate.wait(5)
+        return fetch(url)
+
+    feed = PathsFeed(slow, workers=2, cache_dir="/nonexistent/eeehoc-test-cache")
+    game = _live(1, "0:00", 1, 1, [1], [1])
+    assert feed.for_game(game, today=TODAY).get("loading") is True
+    end = time.time() + 5
+    partial = None
+    while time.time() < end:
+        partial = feed.for_game(game, today=TODAY)
+        if not partial.get("loading"):
+            break
+        time.sleep(0.05)
+    assert partial and partial["complete"] is False and partial["seasons"] == ["2026-27"] and partial["games"] == 4
+    gate.set()
+    feed._worker.join(timeout=5)
+    full = feed.for_game(game, today=TODAY)
+    assert full["complete"] is True and full["games"] == 5 and full["seasons"] == ["2025-26", "2026-27"]
 
 
 def test_paths_endpoint_and_page_shell():
