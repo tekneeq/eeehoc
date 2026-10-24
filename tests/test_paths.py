@@ -228,9 +228,10 @@ def test_feed_serves_this_season_first_then_fills_in_and_caches_past_months(tmp_
     months = [u for u in calls if "dates=" in u]
     assert len(months) == len(set(months))  # each month once
     assert any("dates=202409" in u for u in months) and any("dates=202610" in u for u in months)
-    # Months that are over were written to disk; the current month was not
-    assert (tmp_path / "paths" / "202509.json").exists() and (tmp_path / "paths" / "202409.json").exists()
-    assert not (tmp_path / "paths" / "202610.json").exists()
+    # Finished months with games were written to disk, and the empty summer months; an empty in-season month
+    # and the current month were not
+    assert (tmp_path / "paths" / "202511.json").exists() and (tmp_path / "paths" / "202507.json").exists()
+    assert not (tmp_path / "paths" / "202509.json").exists() and not (tmp_path / "paths" / "202610.json").exists()
     feed.for_game(game, today=TODAY)
     assert len([u for u in calls if "dates=" in u]) == len(months)  # served from memory
 
@@ -238,7 +239,8 @@ def test_feed_serves_this_season_first_then_fills_in_and_caches_past_months(tmp_
     fetch2, calls2 = _fetch_for(_history())
     again = PathsFeed(fetch2, workers=2, cache_dir=tmp_path)
     again.refresh(today=TODAY)
-    assert [u for u in calls2 if "dates=" in u] == [f"{SCOREBOARD_URL}?dates=202610&limit=1000"]
+    asked = [u.split("dates=")[1][:6] for u in calls2 if "dates=" in u]
+    assert "202610" in asked and "202511" not in asked and "202507" not in asked and "202509" in asked
     assert again.for_game(game, today=TODAY)["league"]["count"] == 4  # game e came back from the 2025-11 file
     assert again.for_game(game, today=TODAY)["games"] == 5
 
@@ -271,7 +273,7 @@ def test_feed_publishes_the_current_season_before_the_older_ones_land():
     assert full["complete"] is True and full["games"] == 5 and full["seasons"] == ["2025-26", "2026-27"]
 
 
-def test_paths_endpoint_and_page_shell():
+def test_paths_endpoint_and_page_shell(tmp_path):
     from eeehoc.dashboard import DashboardState, make_handler
     from eeehoc.live import LiveFeed
 
@@ -286,7 +288,7 @@ def test_paths_endpoint_and_page_shell():
         def get(self, **_kwargs):
             return {"loading": True, "teams": {}}
 
-    state = DashboardState(live=FakeLive(), paths=PathsFeed(fetch), power=NoPower())
+    state = DashboardState(live=FakeLive(), paths=PathsFeed(fetch, cache_dir=tmp_path), power=NoPower())
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:

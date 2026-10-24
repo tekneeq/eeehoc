@@ -59,6 +59,7 @@ CURRENT_MONTH_TTL = 90.0
 PAST_MONTH_TTL = 6 * 60 * 60.0
 HISTORY_TTL = 60.0
 CACHE_VERSION = 1
+OFF_SEASON_MONTHS = ("07", "08")
 
 MODEL_NOTE = (
     "Rest-of-game model: each side's shots on goal per 60 (season rate, blended with tonight's pace as "
@@ -570,7 +571,9 @@ class PathsFeed:
         games = parse_month(payload) if isinstance(payload, dict) else []
         with self._lock:
             self._months[ym] = (now, games)
-        if not current:
+        # A finished month is kept for good once it holds games; an empty answer could be a bad
+        # response rather than an empty month, except in July and August, when there is no hockey.
+        if not current and (games or ym[4:] in OFF_SEASON_MONTHS):
             self._write_disk(ym, games)
         return games
 
