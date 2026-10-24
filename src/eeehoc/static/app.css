@@ -930,8 +930,21 @@ body.chiclet-dragging {
   text-transform: uppercase;
   color: var(--muted);
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: 0.1rem 0.4rem;
+}
+
+.pth-h > * {
+  white-space: nowrap;
+}
+
+.pth-order {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  opacity: 0.8;
 }
 
 .pth-live-note {

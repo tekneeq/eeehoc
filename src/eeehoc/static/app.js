@@ -1191,7 +1191,8 @@
     const route = (data.path || []).join(" → ");
     const stateWord = data.after ? (data.exact && !anyWay ? `${route} (same score after every period)` : `${data.score} after the ${PERIOD_WORD[data.after]}`) : "from puck drop";
     const who = kind === "league" ? "every NHL game" : `${name}'s games`;
-    const persp = kind === "league" ? `NHL (home–away ${data.score})` : `${name} (for–against ${kind === "home" ? data.score : data.score.split("-").reverse().join("-")})`;
+    const order = `${data.away?.abbr || "away"}–${data.home?.abbr || "home"}`;
+    const persp = kind === "league" ? `NHL (${order} ${data.score})` : `${name} (${order} ${data.score})`;
     const winLabel = kind === "league" ? "H" : "W";
     const lossLabel = kind === "league" ? "A" : "L";
     const by = lens.win_by || {};
@@ -1255,12 +1256,12 @@
     return wrap(`
         <div class="spg-head">
           <span class="spg-label">Paths <em>from ${esc(stateWord)}</em></span>
-          <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
+          <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Every score reads ${game.away.abbr}–${game.home.abbr}, the order the teams are listed here. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
         </div>
         <div class="pth-head">
           <span></span>
           <span class="pth-h">result</span>
-          <span class="pth-h">${esc(nextWord)} ${liveNote}</span>
+          <span class="pth-h"><span>${esc(nextWord)}</span> <i class="pth-order">${esc(`${game.away.abbr}–${game.home.abbr}`)}</i> ${liveNote}</span>
         </div>
         ${pathsLensHtml(game.away.abbr, teamColor(game.away), lenses.away, data, "away")}
         ${pathsLensHtml(game.home.abbr, teamColor(game.home), lenses.home, data, "home")}
