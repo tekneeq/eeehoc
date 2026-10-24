@@ -1217,7 +1217,7 @@
       <div class="pth-lens ${kind}" style="--team:${color}">
         <span class="pth-name" title="${esc(`${persp}: ${sample}`)}">${esc(name)}<small>${n ? `n=${n}` : "n=0"}</small></span>
         <span class="pth-sum">${summary}</span>
-        <span class="pth-chips" aria-label="${esc(`${name}: ${nextWord}`)}">${branchChips(lens, data, persp)}</span>
+        ${n ? `<span class="pth-chips" aria-label="${esc(`${name}: ${nextWord}`)}">${branchChips(lens, data, persp)}</span>` : ""}
       </div>`;
   }
 
@@ -1269,11 +1269,11 @@
       : "";
     return wrap(`
         <div class="spg-head">
-          <span class="spg-label">Paths <em>from ${esc(stateWord)}</em> <i class="pth-order" title="${esc(`Every score reads ${order}, the order the teams are listed here`)}">${esc(order)}</i></span>
+          <span class="spg-label">Paths <em>from ${esc(stateWord)}</em></span>
           <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Scores read ${order}, the order the teams are listed here. Each box is one lens: how often that side won, how often the game went past regulation, then how many goals the ${period} had (both teams together) with its share of games, and the average. The outlined chip is where this game's ${period} stands.`)}">${esc(key)}</span>
         </div>
         <div class="pth-head">
-          <span class="pth-h"><span>result</span></span>
+          <span class="pth-h" title="${esc(`Every score reads ${order}, the order the teams are listed here`)}"><span>scores</span> <i class="pth-order">${esc(order)}</i></span>
           <span class="pth-h"><span>${esc(nextWord)}</span> ${liveNote}</span>
         </div>
         ${pathsLensHtml(game.away.abbr, teamColor(game.away), lenses.away, data, "away")}
