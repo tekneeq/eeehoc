@@ -916,12 +916,33 @@ body.chiclet-dragging {
   margin-left: 0.3rem;
 }
 
-.pth-head,
+/* One box per lens: the side and its W/OT/L on the first line, its branches on the lines below,
+   so every chip sits inside the box of the side it belongs to. */
+.pth-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0 0.4rem 0 calc(0.4rem + 3px);
+}
+
 .pth-lens {
   display: grid;
-  grid-template-columns: 2.6rem 7.2rem minmax(0, 1fr);
-  gap: 0.15rem 0.4rem;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.5rem;
+  align-items: baseline;
+  padding: 0.26rem 0.4rem 0.3rem;
+  border-left: 3px solid var(--team);
+  border-radius: 0 0.3rem 0.3rem 0;
+  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--team) 7%, transparent);
+}
+
+.pth-lens.league {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pth-lens .pth-chips {
+  grid-column: 1 / -1;
 }
 
 .pth-h {
@@ -957,18 +978,19 @@ body.chiclet-dragging {
   font-weight: 700;
 }
 
-.pth-lens {
-  min-height: 1.5rem;
-}
-
 .pth-name {
   display: flex;
-  flex-direction: column;
-  gap: 0.08rem;
+  align-items: baseline;
+  gap: 0.3rem;
   font-size: 0.66rem;
   font-weight: 700;
   color: var(--team);
   line-height: 1;
+  white-space: nowrap;
+}
+
+.pth-lens.league .pth-name {
+  color: var(--text);
 }
 
 .pth-name small {
@@ -979,7 +1001,8 @@ body.chiclet-dragging {
 
 .pth-sum {
   display: flex;
-  gap: 0.35rem;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.4rem;
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

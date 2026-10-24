@@ -1168,11 +1168,27 @@
     return value === null || value === undefined ? "–" : `${Math.round(value)}%`;
   }
 
+  // Scores sort from the away side's lead to the home side's lead, then by total goals, so every
+  // row lists the same branches in the same order and the rows can be read against each other.
+  function branchOrder(score) {
+    const [a, h] = score.split("-").map(Number);
+    if (!Number.isFinite(a) || !Number.isFinite(h)) return [0, 0];
+    return [h - a, a + h];
+  }
+
   function branchChips(lens, data, perspective) {
     const n = lens.count || 0;
     if (!n) return `<span class="pth-empty">no games from here</span>`;
     const nextWord = data.after < 3 ? `after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
-    const chips = (lens.branches || []).map((b) => {
+    const branches = [...(lens.branches || [])];
+    if (data.after < 3) {
+      branches.sort((x, y) => {
+        const [mx, tx] = branchOrder(x.score);
+        const [my, ty] = branchOrder(y.score);
+        return mx - my || tx - ty;
+      });
+    }
+    const chips = branches.map((b) => {
       const liveWord = b.live ? (data.next_period_done ? "the branch this game took" : "where this game is so far") : "";
       const label = data.after < 3 ? `${b.score} ${nextWord}` : b.score === "REG" ? "decided in regulation" : b.score === "OT" ? "decided in overtime" : "decided in a shootout";
       const title = `${perspective}: ${b.count} of ${n} games — ${label}${liveWord ? ` · ${liveWord}` : ""}`;
@@ -1195,6 +1211,7 @@
     const persp = kind === "league" ? `NHL (${order} ${data.score})` : `${name} (${order} ${data.score})`;
     const winLabel = kind === "league" ? "H" : "W";
     const lossLabel = kind === "league" ? "A" : "L";
+    const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
     const by = lens.win_by || {};
     const summary = n
       ? `<span class="pth-w" title="${esc(`${who} ${stateWord}: ${kind === "league" ? "the home side" : name} won ${lens.wins} of ${n} (${by.REG || 0} in regulation, ${by.OT || 0} in overtime, ${by.SO || 0} in a shootout)`)}"><b>${esc(winLabel)}</b> ${pct0(lens.win_pct)}</span>
@@ -1207,7 +1224,7 @@
       <div class="pth-lens ${kind}" style="--team:${color}">
         <span class="pth-name" title="${esc(`${persp}: ${sample}`)}">${esc(name)}<small>${n ? `n=${n}` : "n=0"}</small></span>
         <span class="pth-sum">${summary}</span>
-        <span class="pth-chips">${branchChips(lens, data, persp)}</span>
+        <span class="pth-chips" aria-label="${esc(`${name}: ${nextWord}`)}">${branchChips(lens, data, persp)}</span>
       </div>`;
   }
 
@@ -1256,12 +1273,11 @@
     return wrap(`
         <div class="spg-head">
           <span class="spg-label">Paths <em>from ${esc(stateWord)}</em></span>
-          <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Every score reads ${game.away.abbr}–${game.home.abbr}, the order the teams are listed here. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
+          <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Every score reads ${game.away.abbr}–${game.home.abbr}, the order the teams are listed here. Each box is one lens: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games, listed from a ${game.away.abbr} lead to a ${game.home.abbr} lead in every box. The outlined chip is this game's branch.`)}">${esc(key)}</span>
         </div>
         <div class="pth-head">
-          <span></span>
-          <span class="pth-h">result</span>
-          <span class="pth-h"><span>${esc(nextWord)}</span> <i class="pth-order">${esc(`${game.away.abbr}–${game.home.abbr}`)}</i> ${liveNote}</span>
+          <span class="pth-h"><span>result</span></span>
+          <span class="pth-h"><span>${esc(nextWord)}</span> <i class="pth-order" title="${esc(`Every score reads ${game.away.abbr}–${game.home.abbr}; chips run from a ${game.away.abbr} lead to a ${game.home.abbr} lead`)}">${esc(`${game.away.abbr}–${game.home.abbr}`)}</i> ${liveNote}</span>
         </div>
         ${pathsLensHtml(game.away.abbr, teamColor(game.away), lenses.away, data, "away")}
         ${pathsLensHtml(game.home.abbr, teamColor(game.home), lenses.home, data, "home")}
