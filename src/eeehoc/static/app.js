@@ -4,6 +4,8 @@
     periods: null,
     form: {},
     formLoading: new Set(),
+    paths: {},
+    pathsLoading: new Set(),
     shots: null,
     power: null,
     tab: "live",
@@ -1122,6 +1124,136 @@
     for (const game of state.board?.games || []) loadForm(game);
   }
 
+  // --------------------------------------------------------------- Paths
+
+  const PATHS_REFRESH_MS = 60000;
+  const PERIOD_WORD = ["puck drop", "1st", "2nd", "3rd"];
+
+  // The tree moves when the score or the period does; the model moves with the clock and shots.
+  function pathsSignature(game) {
+    const shots = `${game.away.stats?.shots ?? ""}/${game.home.stats?.shots ?? ""}`;
+    return [game.state, game.period, game.away.score, game.home.score, (game.away.linescores || []).join("."), (game.home.linescores || []).join("."), shots].join("|");
+  }
+
+  async function loadPaths(game) {
+    if (!game || !game.home?.id || !game.away?.id || state.pathsLoading.has(game.id)) return;
+    const sig = pathsSignature(game);
+    const have = state.paths[game.id];
+    if (have && have.sig === sig && Date.now() - have.at < PATHS_REFRESH_MS) return;
+    if (have && have.data?.loading && Date.now() - have.at < 4000) return;
+    state.pathsLoading.add(game.id);
+    try {
+      const res = await fetch(`/api/paths?game=${encodeURIComponent(game.id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      state.paths[game.id] = { sig, at: Date.now(), data };
+      if (data.loading) setTimeout(() => loadPaths(game), 4000);
+    } catch (err) {
+      state.paths[game.id] = { sig, at: Date.now(), data: { error: err.message || String(err) } };
+    } finally {
+      state.pathsLoading.delete(game.id);
+    }
+    document.querySelectorAll(`[data-paths-for="${CSS.escape(game.id)}"]`).forEach((el) => {
+      el.outerHTML = pathsHtml(game);
+    });
+  }
+
+  function loadVisiblePaths() {
+    for (const game of state.board?.games || []) loadPaths(game);
+  }
+
+  function pct0(value) {
+    return value === null || value === undefined ? "–" : `${Math.round(value)}%`;
+  }
+
+  function branchChips(lens, data, perspective) {
+    const n = lens.count || 0;
+    if (!n) return `<span class="pth-empty">no games from here</span>`;
+    const nextWord = data.after < 3 ? `after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
+    const chips = (lens.branches || []).map((b) => {
+      const liveWord = b.live ? (data.next_period_done ? "the branch this game took" : "where this game is so far") : "";
+      const label = data.after < 3 ? `${b.score} ${nextWord}` : b.score === "REG" ? "decided in regulation" : b.score === "OT" ? "decided in overtime" : "decided in a shootout";
+      const title = `${perspective}: ${b.count} of ${n} games — ${label}${liveWord ? ` · ${liveWord}` : ""}`;
+      return `<span class="pth-chip${b.live ? " live" : ""}" title="${esc(title)}">${esc(b.score === "REG" ? "Reg" : b.score)} <b>${pct0(b.pct)}</b><small>${b.count}</small></span>`;
+    });
+    if (lens.other_count) {
+      chips.push(`<span class="pth-chip dim" title="${esc(`${perspective}: ${lens.other_count} of ${n} games went to other scores`)}">other <b>${pct0(lens.other_pct)}</b><small>${lens.other_count}</small></span>`);
+    }
+    return chips.join("");
+  }
+
+  function pathsLensHtml(name, color, lens, data, kind) {
+    const n = lens.count || 0;
+    const seasons = (data.seasons || []).length;
+    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
+    const who = kind === "league" ? "every NHL game" : `${name}'s games`;
+    const persp = kind === "league" ? `NHL (home–away ${data.score})` : `${name} (for–against ${kind === "home" ? data.score : data.score.split("-").reverse().join("-")})`;
+    const winLabel = kind === "league" ? "home" : "W";
+    const lossLabel = kind === "league" ? "away" : "L";
+    const by = lens.win_by || {};
+    const summary = n
+      ? `<span class="pth-w" title="${esc(`${who} ${stateWord}: ${winLabel === "home" ? "the home side" : name} won ${lens.wins} of ${n} (${by.REG || 0} in regulation, ${by.OT || 0} in overtime, ${by.SO || 0} in a shootout)`)}"><b>${esc(winLabel)}</b> ${pct0(lens.win_pct)}</span>
+         <span class="pth-ot" title="${esc(`${who} ${stateWord}: ${lens.past_regulation_pct ?? 0}% went past regulation — ${pct0(lens.ot_pct)} overtime, ${pct0(lens.so_pct)} shootout`)}"><b>OT</b> ${pct0(lens.past_regulation_pct)}</span>
+         <span class="pth-l" title="${esc(`${who} ${stateWord}: ${winLabel === "home" ? "the away side" : "the other side"} won ${lens.losses} of ${n}`)}"><b>${esc(lossLabel)}</b> ${pct0(lens.loss_pct)}</span>`
+      : `<span class="pth-empty">no games ${esc(stateWord)}</span>`;
+    const finals = (lens.finals || []).map((f) => `${f.score} ${pct0(f.pct)}`).join(" · ");
+    const sample = `${plural(n, "game")} ${stateWord} in ${plural(seasons, "season")}${finals ? ` · finals: ${finals}` : ""}${lens.stayed_pct ? ` · still ${data.score} at the end of regulation in ${pct0(lens.stayed_pct)}` : ""}`;
+    return `
+      <div class="pth-lens ${kind}" style="--team:${color}">
+        <span class="pth-name" title="${esc(`${persp}: ${sample}`)}">${esc(name)}<small>${n ? `n=${n}` : "n=0"}</small></span>
+        <span class="pth-sum">${summary}</span>
+        <span class="pth-chips">${branchChips(lens, data, persp)}</span>
+      </div>`;
+  }
+
+  function pathsModelHtml(game, data) {
+    const m = data.model;
+    if (!m) return "";
+    const side = (team, row, win) => {
+      const pace = row.tonight_per_60 === null || row.tonight_per_60 === undefined ? "" : ` · tonight ${fmtNum(row.tonight_per_60, 1)}/60 (${row.shots_tonight} so far)`;
+      const goalie = row.opp_goalie ? `${row.opp_goalie}${row.opp_goalie_rank ? ` ${row.opp_goalie_rank}` : ""}${row.opp_goalie_save_pct ? ` ${String(row.opp_goalie_save_pct.toFixed(3)).replace(/^0/, "")}` : ""}` : "league goalie";
+      const title = `${team.abbr}: ${pct0(win)} to win from here — shoots ${fmtNum(row.shots_per_60, 1)}/60 this season${pace}, so ${fmtNum(row.rate_used, 1)}/60 is used, into ${goalie} (${String(row.save_pct_used.toFixed(3)).replace(/^0/, "")} used after shrinking toward the league's ${String(m.league_save_pct.toFixed(3)).replace(/^0/, "")}) → ${fmtNum(row.expected_goals_left)} goals expected in the ${Math.round(m.remaining_sec / 60)} minutes left`;
+      return `<span class="pth-model-side" style="--team:${teamColor(team)}" title="${esc(title)}"><b>${pct0(win)}</b><small>${esc(`${fmtNum(row.expected_goals_left)} xg left · ${fmtNum(row.rate_used, 1)} sh/60 · ${goalie}`)}</small></span>`;
+    };
+    const clock = data.state === "pre" ? "before puck drop" : `${Math.round(m.remaining_sec / 60)} min of regulation left`;
+    return `
+      <div class="pth-model">
+        ${side(game.away, m.away, m.away_win)}
+        <span class="pth-model-mid" title="${esc(m.note)}"><b>OT ${pct0(m.to_overtime)}</b><small>model · ${esc(clock)}</small></span>
+        ${side(game.home, m.home, m.home_win)}
+      </div>`;
+  }
+
+  function pathsHtml(game) {
+    const entry = state.paths[game.id];
+    const data = entry?.data;
+    const wrap = (inner) => `<section class="pth" data-paths-for="${esc(game.id)}" aria-label="Where games go from this score after this period">${inner}</section>`;
+    if (!data || data.loading) {
+      return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${data?.error ? esc(data.error) : "loading three seasons of finals…"}</span></div>`);
+    }
+    if (data.error && !data.league) {
+      return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${esc(data.error)}</span></div>`);
+    }
+    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
+    const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
+    const key = `${plural(data.games || 0, "final")} · ${(data.seasons || []).join(", ")}`;
+    const liveNote = data.live_branch ? `<span class="pth-live-note">${data.next_period_done ? "took" : "so far"} <b>${esc(data.live_score)}</b></span>` : "";
+    return wrap(`
+        <div class="spg-head">
+          <span class="spg-label">Paths <em>from ${esc(stateWord)}</em></span>
+          <span class="spg-key" title="${esc(`Every regular-season and playoff final in these seasons, read from ESPN's goals by period. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
+        </div>
+        <div class="pth-head">
+          <span></span>
+          <span class="pth-h">result</span>
+          <span class="pth-h">${esc(nextWord)} ${liveNote}</span>
+        </div>
+        ${pathsLensHtml(game.away.abbr, teamColor(game.away), data.away, data, "away")}
+        ${pathsLensHtml(game.home.abbr, teamColor(game.home), data.home, data, "home")}
+        ${pathsLensHtml("NHL", "var(--muted)", data.league, data, "league")}
+        ${pathsModelHtml(game, data)}`);
+  }
+
   function chicletHtml(game) {
     const expanded = state.expanded.has(game.id);
     const s = game.situation;
@@ -1207,6 +1339,7 @@
         ${goalTimeline(game)}
         ${linescore(game)}
         ${periodShots(game)}
+        ${pathsHtml(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${shotsPerGoalHtml(game)}
         ${powerHtml(game)}
@@ -1609,6 +1742,7 @@
       animateShuffle(cards, new Map(cards.map((c) => [c, before.get(c.dataset.id)])));
     }
     loadVisibleForms();
+    loadVisiblePaths();
   }
 
   function onGridClick(ev) {
