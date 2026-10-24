@@ -1236,12 +1236,12 @@
     }
     const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
     const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
-    const key = `${plural(data.games || 0, "final")} · ${(data.seasons || []).join(", ")}`;
+    const key = `${(data.games || 0).toLocaleString("en-US")} finals · ${plural((data.seasons || []).length, "season")}`;
     const liveNote = data.live_branch ? `<span class="pth-live-note">${data.next_period_done ? "took" : "so far"} <b>${esc(data.live_score)}</b></span>` : "";
     return wrap(`
         <div class="spg-head">
           <span class="spg-label">Paths <em>from ${esc(stateWord)}</em></span>
-          <span class="spg-key" title="${esc(`Every regular-season and playoff final in these seasons, read from ESPN's goals by period. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
+          <span class="spg-key" title="${esc(`Every regular-season and playoff final in ${(data.seasons || []).join(", ")}, read from ESPN's goals by period. Each row: how often that side won, how often the game went past regulation, then the ${nextWord} with its share of games. The outlined chip is this game's branch.`)}">${esc(key)}</span>
         </div>
         <div class="pth-head">
           <span></span>
