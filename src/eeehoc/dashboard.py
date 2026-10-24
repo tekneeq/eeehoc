@@ -15,6 +15,7 @@ from eeehoc.live import DATE_RE, LiveFeed
 from eeehoc.periods import PeriodFeed
 from eeehoc.power import PowerFeed
 from eeehoc.shots import ShotsFeed
+from eeehoc.paths import PathsFeed
 from eeehoc.winprob import WinProbService, day_view
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -31,6 +32,7 @@ class DashboardState:
         winprob: WinProbService | None = None,
         shots: ShotsFeed | None = None,
         power: PowerFeed | None = None,
+        paths: PathsFeed | None = None,
     ) -> None:
         self.live = live or LiveFeed()
         self.periods = periods or PeriodFeed()
@@ -38,6 +40,7 @@ class DashboardState:
         self.winprob = winprob or WinProbService()
         self.shots = shots or ShotsFeed()
         self.power = power or PowerFeed()
+        self.paths = paths or PathsFeed()
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -133,6 +136,25 @@ def make_handler(state: DashboardState):
                 except Exception as exc:  # noqa: BLE001
                     return self._send(502, _json_bytes({"error": str(exc), "teams": {}}), "application/json")
                 return self._send(200, _json_bytes(board), "application/json")
+
+            if path == "/api/paths":
+                game_id = (qs.get("game") or [""])[0].strip()
+                wait = (qs.get("wait") or ["0"])[0] in ("1", "true")
+                if not game_id.isdigit():
+                    return self._send(400, _json_bytes({"error": "game id is required"}), "application/json")
+                try:
+                    board = state.live.get()
+                    game = next((g for g in board.get("games") or [] if str(g.get("id")) == game_id), None)
+                    if game is None:
+                        return self._send(404, _json_bytes({"error": "game is not on today's board"}), "application/json")
+                    try:
+                        power = state.power.get()
+                    except Exception:  # noqa: BLE001 - the model falls back to league rates
+                        power = None
+                    paths = state.paths.for_game(game, power=power if power and power.get("teams") else None, wait=wait)
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc)}), "application/json")
+                return self._send(200, _json_bytes(paths), "application/json")
 
             if path == "/api/winprob":
                 season_q = (qs.get("season") or [""])[0].strip()

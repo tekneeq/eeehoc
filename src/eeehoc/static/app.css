@@ -897,6 +897,191 @@ body.chiclet-dragging {
   color: var(--muted);
 }
 
+/* Paths: from the score after the last period, how often each side won and the branch tree of next scores. */
+.pth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+}
+
+.pth .spg-label em {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--text);
+  margin-left: 0.3rem;
+}
+
+.pth-head,
+.pth-lens {
+  display: grid;
+  grid-template-columns: 2.6rem 7.2rem minmax(0, 1fr);
+  gap: 0.15rem 0.4rem;
+  align-items: center;
+}
+
+.pth-h {
+  font-size: 0.52rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.pth-live-note {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ice);
+}
+
+.pth-live-note b {
+  font-weight: 700;
+}
+
+.pth-lens {
+  min-height: 1.5rem;
+}
+
+.pth-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--team);
+  line-height: 1;
+}
+
+.pth-name small {
+  font-size: 0.5rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.pth-sum {
+  display: flex;
+  gap: 0.35rem;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pth-sum b {
+  font-size: 0.52rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 0.1rem;
+}
+
+.pth-w {
+  color: var(--accent);
+}
+
+.pth-ot {
+  color: var(--ice);
+}
+
+.pth-l {
+  color: var(--warn);
+}
+
+.pth-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.14rem;
+}
+
+.pth-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.18rem;
+  padding: 0.06rem 0.26rem;
+  border: 1px solid var(--line);
+  border-radius: 0.24rem;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 0.56rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.pth-chip b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.pth-chip small {
+  font-size: 0.48rem;
+  opacity: 0.7;
+}
+
+.pth-chip.live {
+  border-color: var(--ice);
+  background: rgba(159, 212, 255, 0.12);
+  color: var(--text);
+}
+
+.pth-chip.live b {
+  color: var(--ice);
+}
+
+.pth-chip.dim {
+  border-style: dashed;
+}
+
+.pth-empty {
+  font-size: 0.56rem;
+  color: var(--muted);
+}
+
+.pth-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.2rem minmax(0, 1fr);
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  padding-top: 0.3rem;
+  border-top: 1px dashed var(--line);
+}
+
+.pth-model-side,
+.pth-model-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  line-height: 1.15;
+  padding: 0.14rem 0.1rem;
+  border-radius: 0.28rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  font-variant-numeric: tabular-nums;
+}
+
+.pth-model-side b {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--team);
+}
+
+.pth-model-mid b {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ice);
+}
+
+.pth-model-side small,
+.pth-model-mid small {
+  font-size: 0.48rem;
+  color: var(--muted);
+  white-space: normal;
+}
+
 /* Power: offence / defence indexes, expected goals, and special teams, away left and home right. */
 .pwr {
   display: flex;
