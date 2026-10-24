@@ -42,6 +42,8 @@ PERIOD_SECONDS = 20 * 60
 REGULATION_SECONDS = REGULATION * PERIOD_SECONDS
 MAX_BRANCHES = 6
 MAX_FINALS = 6
+# Goals in the next period are bucketed 0, 1, 2, 3 and 4 or more.
+GOAL_BUCKETS = ("0", "1", "2", "3", "4+")
 
 # Model: tonight's shot pace counts only after the first few minutes, and is worth as much
 # as the season rate once this much more has been played.
@@ -160,6 +162,10 @@ def _key(a: int, b: int) -> str:
     return f"{a}-{b}"
 
 
+def _goal_bucket(goals: int) -> str:
+    return GOAL_BUCKETS[min(max(goals, 0), len(GOAL_BUCKETS) - 1)]
+
+
 def _lens(
     games: list[dict[str, Any]],
     *,
@@ -174,6 +180,9 @@ def _lens(
     With ``path`` (the score after each completed period) only games that went
     through the same scores period by period count; otherwise any game at
     ``score`` after ``after`` periods does, however it got there.
+
+    The branches are how many goals the next period had (``GOAL_BUCKETS``), or,
+    at the end of regulation, how the game was decided (REG, OT, SO).
     """
     steps = list(path) if path else [score]
     if len(steps) != after and after:
@@ -184,6 +193,7 @@ def _lens(
     win_by = {"REG": 0, "OT": 0, "SO": 0}
     stayed = 0
     next_counts: dict[str, int] = {}
+    next_goals = 0
     finals: dict[str, int] = {}
     for g in games:
         if team_id is not None:
@@ -225,23 +235,22 @@ def _lens(
             stayed += 1
         if after < REGULATION:
             nh, na = score_after(g, after + 1)
-            nxt = (na, nh) if flip else (nh, na)
-            next_counts[_key(*nxt)] = next_counts.get(_key(*nxt), 0) + 1
+            goals = (nh + na) - (h + a)
+            next_goals += goals
+            next_counts[_goal_bucket(goals)] = next_counts.get(_goal_bucket(goals), 0) + 1
         else:
             next_counts[g["end"]] = next_counts.get(g["end"], 0) + 1
 
-    live_key = _key(*live_next) if live_next is not None and after < REGULATION else None
-    branches = []
-    for key, count in sorted(next_counts.items(), key=lambda kv: (-kv[1], kv[0])):
-        branches.append({"score": key, "count": count, "pct": _pct(count, n), "live": key == live_key})
-    shown = branches[:MAX_BRANCHES]
-    if live_key and not any(b["live"] for b in shown):
-        hit = next((b for b in branches if b["live"]), None)
-        if hit:
-            shown = shown[: MAX_BRANCHES - 1] + [hit]
-        else:
-            shown = shown[: MAX_BRANCHES - 1] + [{"score": live_key, "count": 0, "pct": 0.0 if n else None, "live": True}]
-    rest = sum(b["count"] for b in branches) - sum(b["count"] for b in shown)
+    if after < REGULATION:
+        live_key = _goal_bucket(sum(live_next) - sum(score)) if live_next is not None else None
+        shown = [{"key": k, "count": next_counts.get(k, 0), "pct": _pct(next_counts.get(k, 0), n), "live": k == live_key} for k in GOAL_BUCKETS]
+        rest = 0
+    else:
+        shown = [
+            {"key": key, "count": count, "pct": _pct(count, n), "live": False}
+            for key, count in sorted(next_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ][:MAX_BRANCHES]
+        rest = sum(next_counts.values()) - sum(b["count"] for b in shown)
     return {
         "team": team_id,
         "count": n,
@@ -255,6 +264,7 @@ def _lens(
         "win_by": win_by,
         "stayed_pct": _pct(stayed, n),
         "branches": shown,
+        "next_goals_avg": round(next_goals / n, 2) if n and after < REGULATION else None,
         "other_count": rest,
         "other_pct": _pct(rest, n),
         "finals": [{"score": k, "count": c, "pct": _pct(c, n)} for k, c in sorted(finals.items(), key=lambda kv: (-kv[1], kv[0]))[:MAX_FINALS]],
@@ -480,11 +490,10 @@ def _flip_key(key: str) -> str:
 
 
 def _oriented(lens: dict[str, Any], flip: bool) -> dict[str, Any]:
-    """The lens with its scores written away–home, the way the chiclet lists the teams."""
+    """The lens with its finals written away–home, the way the chiclet lists the teams."""
     if not flip:
         return lens
     out = dict(lens)
-    out["branches"] = [{**b, "score": _flip_key(b["score"])} for b in lens["branches"]]
     out["finals"] = [{**f, "score": _flip_key(f["score"])} for f in lens["finals"]]
     return out
 
@@ -531,7 +540,9 @@ def build_paths(
         "orientation": "away-home",
         "score": _key(score[1], score[0]),
         "live_score": _key(as_, hs),
-        "live_branch": _key(as_, hs) if live_next else None,
+        # The branch this game is on: goals in the period under way (or just finished).
+        "live_goals": (hs + as_) - sum(score) if live_next else None,
+        "live_branch": _goal_bucket((hs + as_) - sum(score)) if live_next else None,
         "next_period_done": live["next_period_done"],
         "elapsed_sec": live["elapsed"],
         "remaining_sec": live["remaining"],

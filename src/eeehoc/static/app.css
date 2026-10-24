@@ -966,6 +966,14 @@ body.chiclet-dragging {
   letter-spacing: 0;
   color: var(--text);
   opacity: 0.8;
+  white-space: nowrap;
+}
+
+.pth .spg-label .pth-order {
+  font-size: 0.58rem;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 0.3rem;
 }
 
 .pth-live-note {
@@ -1025,6 +1033,11 @@ body.chiclet-dragging {
 
 .pth-l {
   color: var(--warn);
+}
+
+.pth-avg {
+  color: var(--text);
+  opacity: 0.85;
 }
 
 .pth-chips {
