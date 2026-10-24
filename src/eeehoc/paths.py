@@ -474,6 +474,21 @@ def league_rates(games: list[dict[str, Any]], season_year: int) -> tuple[float, 
     return shots / (2 * len(pool)), (saves / shots if shots else LEAGUE_SAVE_PCT)
 
 
+def _flip_key(key: str) -> str:
+    a, _, b = key.partition("-")
+    return f"{b}-{a}" if a.isdigit() and b.isdigit() else key
+
+
+def _oriented(lens: dict[str, Any], flip: bool) -> dict[str, Any]:
+    """The lens with its scores written away–home, the way the chiclet lists the teams."""
+    if not flip:
+        return lens
+    out = dict(lens)
+    out["branches"] = [{**b, "score": _flip_key(b["score"])} for b in lens["branches"]]
+    out["finals"] = [{**f, "score": _flip_key(f["score"])} for f in lens["finals"]]
+    return out
+
+
 def build_paths(
     games: list[dict[str, Any]],
     game: dict[str, Any],
@@ -499,8 +514,12 @@ def build_paths(
             "league": _lens(games, after=after, score=score, team_id=None, live_next=live_next, path=route),
         }
 
-    lenses = views(path if exact else None)
-    any_way = views(None) if exact else None
+    def oriented(v: dict[str, Any]) -> dict[str, Any]:
+        # The away lens is already for–against = away–home; the home and league lenses are home–away.
+        return {"home": _oriented(v["home"], True), "away": v["away"], "league": _oriented(v["league"], True)}
+
+    lenses = oriented(views(path if exact else None))
+    any_way = oriented(views(None)) if exact else None
     years = sorted({g["season_year"] for g in games if g["season_year"]})
     shots_60, save_pct = league_rates(games, season_year or (years[-1] if years else 0))
     model = rest_of_game(game, live, power=power, league_shots=shots_60, league_save_pct=save_pct)
@@ -508,14 +527,16 @@ def build_paths(
         "game": str(game.get("id") or ""),
         "state": live["state"],
         "after": after,
-        "score": _key(*score),
-        "live_score": _key(hs, as_),
-        "live_branch": _key(hs, as_) if live_next else None,
+        # Every score in the payload reads away–home, matching the order the chiclet lists the teams.
+        "orientation": "away-home",
+        "score": _key(score[1], score[0]),
+        "live_score": _key(as_, hs),
+        "live_branch": _key(as_, hs) if live_next else None,
         "next_period_done": live["next_period_done"],
         "elapsed_sec": live["elapsed"],
         "remaining_sec": live["remaining"],
         # Default lenses follow the exact path of period scores; ``any`` is the state-only view.
-        "path": [_key(h, a) for h, a in path],
+        "path": [_key(a, h) for h, a in path],
         "exact": exact,
         "home": {"id": home_id, "abbr": str((game.get("home") or {}).get("abbr") or ""), **lenses["home"]},
         "away": {"id": away_id, "abbr": str((game.get("away") or {}).get("abbr") or ""), **lenses["away"]},
