@@ -130,7 +130,9 @@ def test_game_state_finds_the_last_completed_period():
 def test_build_paths_three_lenses_with_the_live_branch_marked():
     games = parse_month({"events": _history()})
     out = build_paths(games, _live(2, "12:00", 2, 1, [1, 1], [1, 0]), season_year=2027)
-    assert out["after"] == 1 and out["score"] == "1-1" and out["live_branch"] == "2-1" and not out["next_period_done"]
+    # Every score in the payload reads away–home (MTL–CHI)
+    assert out["orientation"] == "away-home"
+    assert out["after"] == 1 and out["score"] == "1-1" and out["live_branch"] == "1-2" and not out["next_period_done"]
     assert out["seasons"] == ["2025-26", "2026-27"] and out["games"] == 5
 
     # CHI (home lens, for-against): games a (lost 2-3), c (won in SO), e (won 4-1 away) were 1-1 after the 1st
@@ -139,24 +141,24 @@ def test_build_paths_three_lenses_with_the_live_branch_marked():
     assert chi["win_pct"] == 67.0 and chi["loss_pct"] == 33.0 and chi["past_regulation_pct"] == 33.0 and chi["so_pct"] == 33.0
     assert chi["win_by"] == {"REG": 1, "OT": 0, "SO": 1}
     branches = {b["score"]: b for b in chi["branches"]}
-    # after the 2nd: a → 2-2 (CHI scored one, MTL one), c → 1-1, e → 3-1 for CHI; live 2-1 is not in the history, so it is shown with no games
-    assert branches["2-2"]["count"] == 1 and branches["1-1"]["count"] == 1 and branches["3-1"]["count"] == 1
-    assert branches["2-1"]["count"] == 0 and branches["2-1"]["live"] is True and branches["2-1"]["pct"] == 0.0
+    # after the 2nd, MTL–CHI: a → 2-2, c → 1-1, e → 1-3 (CHI scored two); live 1-2 is not in the history, so it is shown with no games
+    assert branches["2-2"]["count"] == 1 and branches["1-1"]["count"] == 1 and branches["1-3"]["count"] == 1
+    assert branches["1-2"]["count"] == 0 and branches["1-2"]["live"] is True and branches["1-2"]["pct"] == 0.0
     assert chi["stayed_pct"] == 33.0  # game c was still 1-1 at the end of regulation
 
     # MTL (away lens): a (won 3-2) and b (lost in OT) were 1-1 after the 1st; d was 0-0
     mtl = out["away"]
     assert mtl["count"] == 2 and mtl["win_pct"] == 50.0 and mtl["past_regulation_pct"] == 50.0 and mtl["ot_pct"] == 50.0
     mtl_branches = {b["score"]: b for b in mtl["branches"]}
-    assert mtl_branches["2-2"]["count"] == 1 and mtl_branches["1-2"]["count"] == 1  # for-against: b was 1-2 after the 2nd for MTL
+    assert mtl_branches["2-2"]["count"] == 1 and mtl_branches["1-2"]["count"] == 1  # MTL–CHI: b was 1-2 for MTL after the 2nd
     assert mtl_branches["1-2"]["live"] is True
     assert [f["score"] for f in mtl["finals"]] == ["2-3", "3-2"]
 
     # League (home-away): a, b, c, e were 1-1 after the 1st; the home side won a, b and c
     nhl = out["league"]
     assert nhl["count"] == 4 and nhl["win_pct"] == 75.0 and nhl["loss_pct"] == 25.0 and nhl["past_regulation_pct"] == 50.0
-    assert {b["score"]: b["count"] for b in nhl["branches"] if b["count"]} == {"2-2": 1, "2-1": 1, "1-1": 1, "1-3": 1}
-    assert any(b["live"] and b["score"] == "2-1" for b in nhl["branches"])
+    assert {b["score"]: b["count"] for b in nhl["branches"] if b["count"]} == {"2-2": 1, "1-2": 1, "1-1": 1, "3-1": 1}
+    assert any(b["live"] and b["score"] == "1-2" for b in nhl["branches"])
 
 
 def test_build_paths_follows_the_exact_route_of_period_scores_with_an_any_way_view():
@@ -171,10 +173,10 @@ def test_build_paths_follows_the_exact_route_of_period_scores_with_an_any_way_vi
     games = parse_month({"events": _history() + extra})
     live = _live(3, "15:00", 1, 3, [1, 0, 0], [1, 2, 0])  # CHI home 1, MTL away 3; 1-1 → 1-3
     out = build_paths(games, live, season_year=2027)
-    assert out["after"] == 2 and out["score"] == "1-3" and out["path"] == ["1-1", "1-3"] and out["exact"] is True
+    assert out["after"] == 2 and out["score"] == "3-1" and out["path"] == ["1-1", "3-1"] and out["exact"] is True
 
-    # Exact route (default): e, x1 and x3 went 1-1 → 1-3; x2 (0-2 → 1-3) did not
-    assert out["league"]["count"] == 3 and {b["score"] for b in out["league"]["branches"]} == {"1-4", "2-4", "1-3"}
+    # Exact route (default): e, x1 and x3 went 1-1 → 3-1 (MTL–CHI); x2 (2-0 → 3-1) did not
+    assert out["league"]["count"] == 3 and {b["score"] for b in out["league"]["branches"]} == {"4-1", "4-2", "3-1"}
     assert out["home"]["count"] == 1  # CHI at home only in x1 (for–against 1-1 → 1-3), lost 2-4
     assert out["home"]["loss_pct"] == 100.0
     assert out["away"]["count"] == 2  # MTL in x1 and x3, both for–against 1-1 → 3-1, both won
@@ -323,7 +325,7 @@ def test_paths_endpoint_and_page_shell(tmp_path):
     try:
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         out = json.loads(urllib.request.urlopen(base + "/api/paths?game=401000001&wait=1", timeout=5).read())
-        assert out["score"] == "1-1" and out["live_branch"] == "2-1" and out["model"]["home_win"] > 50
+        assert out["score"] == "1-1" and out["live_branch"] == "1-2" and out["model"]["home_win"] > 50
         try:
             urllib.request.urlopen(base + "/api/paths?game=999", timeout=5)
         except urllib.error.HTTPError as exc:

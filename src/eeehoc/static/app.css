@@ -934,6 +934,14 @@ body.chiclet-dragging {
   gap: 0.4rem;
 }
 
+.pth-order {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  opacity: 0.8;
+}
+
 .pth-live-note {
   text-transform: none;
   letter-spacing: 0;
