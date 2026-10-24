@@ -1027,6 +1027,11 @@ body.chiclet-dragging {
   color: var(--warn);
 }
 
+.pth-avg {
+  color: var(--text);
+  opacity: 0.85;
+}
+
 .pth-chips {
   display: flex;
   flex-wrap: wrap;
