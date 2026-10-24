@@ -1261,7 +1261,7 @@
         <div class="pth-head">
           <span></span>
           <span class="pth-h">result</span>
-          <span class="pth-h">${esc(nextWord)} <i class="pth-order">${esc(`${game.away.abbr}–${game.home.abbr}`)}</i> ${liveNote}</span>
+          <span class="pth-h"><span>${esc(nextWord)}</span> <i class="pth-order">${esc(`${game.away.abbr}–${game.home.abbr}`)}</i> ${liveNote}</span>
         </div>
         ${pathsLensHtml(game.away.abbr, teamColor(game.away), lenses.away, data, "away")}
         ${pathsLensHtml(game.home.abbr, teamColor(game.home), lenses.home, data, "home")}
