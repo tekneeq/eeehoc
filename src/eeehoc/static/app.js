@@ -1188,13 +1188,13 @@
     const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
     const who = kind === "league" ? "every NHL game" : `${name}'s games`;
     const persp = kind === "league" ? `NHL (home–away ${data.score})` : `${name} (for–against ${kind === "home" ? data.score : data.score.split("-").reverse().join("-")})`;
-    const winLabel = kind === "league" ? "home" : "W";
-    const lossLabel = kind === "league" ? "away" : "L";
+    const winLabel = kind === "league" ? "H" : "W";
+    const lossLabel = kind === "league" ? "A" : "L";
     const by = lens.win_by || {};
     const summary = n
-      ? `<span class="pth-w" title="${esc(`${who} ${stateWord}: ${winLabel === "home" ? "the home side" : name} won ${lens.wins} of ${n} (${by.REG || 0} in regulation, ${by.OT || 0} in overtime, ${by.SO || 0} in a shootout)`)}"><b>${esc(winLabel)}</b> ${pct0(lens.win_pct)}</span>
+      ? `<span class="pth-w" title="${esc(`${who} ${stateWord}: ${kind === "league" ? "the home side" : name} won ${lens.wins} of ${n} (${by.REG || 0} in regulation, ${by.OT || 0} in overtime, ${by.SO || 0} in a shootout)`)}"><b>${esc(winLabel)}</b> ${pct0(lens.win_pct)}</span>
          <span class="pth-ot" title="${esc(`${who} ${stateWord}: ${lens.past_regulation_pct ?? 0}% went past regulation — ${pct0(lens.ot_pct)} overtime, ${pct0(lens.so_pct)} shootout`)}"><b>OT</b> ${pct0(lens.past_regulation_pct)}</span>
-         <span class="pth-l" title="${esc(`${who} ${stateWord}: ${winLabel === "home" ? "the away side" : "the other side"} won ${lens.losses} of ${n}`)}"><b>${esc(lossLabel)}</b> ${pct0(lens.loss_pct)}</span>`
+         <span class="pth-l" title="${esc(`${who} ${stateWord}: ${kind === "league" ? "the away side" : "the other side"} won ${lens.losses} of ${n}`)}"><b>${esc(lossLabel)}</b> ${pct0(lens.loss_pct)}</span>`
       : `<span class="pth-empty">no games ${esc(stateWord)}</span>`;
     const finals = (lens.finals || []).map((f) => `${f.score} ${pct0(f.pct)}`).join(" · ");
     const sample = `${plural(n, "game")} ${stateWord} in ${plural(seasons, "season")}${finals ? ` · finals: ${finals}` : ""}${lens.stayed_pct ? ` · still ${data.score} at the end of regulation in ${pct0(lens.stayed_pct)}` : ""}`;
@@ -1234,7 +1234,7 @@
     if (data.error && !data.league) {
       return wrap(`<div class="spg-head"><span class="spg-label">Paths</span><span class="spg-key">${esc(data.error)}</span></div>`);
     }
-    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "from puck drop";
+    const stateWord = data.after ? `${data.score} after the ${PERIOD_WORD[data.after]}` : "puck drop";
     const nextWord = data.after < 3 ? `score after the ${PERIOD_WORD[data.after + 1]}` : "how it ended";
     const key = `${(data.games || 0).toLocaleString("en-US")} finals · ${plural((data.seasons || []).length, "season")}`;
     const liveNote = data.live_branch ? `<span class="pth-live-note">${data.next_period_done ? "took" : "so far"} <b>${esc(data.live_score)}</b></span>` : "";

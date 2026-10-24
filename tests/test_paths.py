@@ -180,9 +180,12 @@ def test_rest_of_game_model_leans_on_shot_pace_and_the_goalies():
     assert model["remaining_sec"] == 1920
     # CHI shoots (26 + 28) / 2 = 27 a game; MTL (32 + 30) / 2 = 31
     assert model["home"]["shots_per_60"] == 27.0 and model["away"]["shots_per_60"] == 31.0
-    # Tonight's pace: 9 shots in 28 minutes, 15 in 28, blended by elapsed / (elapsed + 20 min)
+    # Tonight's pace: 9 shots in 28 minutes, 15 in 28, blended by (elapsed − 5 min) / (that + 20 min)
     assert model["home"]["tonight_per_60"] == 19.3 and model["away"]["tonight_per_60"] == 32.1
     assert model["home"]["rate_used"] < 27.0 < 31.0 < model["away"]["rate_used"]
+    # Three shots in the first ninety seconds are not a pace yet
+    early = rest_of_game(_live(1, "18:30", 0, 0, [], [], home_shots="1", away_shots="3"), game_state(_live(1, "18:30", 0, 0, [], [], home_shots="1", away_shots="3")), power=power, league_shots=29.0, league_save_pct=0.9)
+    assert early["away"]["tonight_per_60"] == 120.0 and early["away"]["rate_used"] == 31.0
     # Goalies: CHI shoots into Dobes (.925 → .915 used); MTL into Soderblom (.912 → .907 used)
     assert model["home"]["opp_goalie"] == "J. Dobes" and model["home"]["opp_goalie_rank"] == "#5" and model["home"]["save_pct_used"] == 0.915
     assert model["away"]["save_pct_used"] == 0.907

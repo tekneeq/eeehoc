@@ -40,7 +40,9 @@ REGULATION_SECONDS = REGULATION * PERIOD_SECONDS
 MAX_BRANCHES = 6
 MAX_FINALS = 6
 
-# Model: tonight's shot pace is worth as much as the season rate after this long.
+# Model: tonight's shot pace counts only after the first few minutes, and is worth as much
+# as the season rate once this much more has been played.
+PACE_MIN_SECONDS = 5 * 60
 PACE_HALF_LIFE_SECONDS = 20 * 60
 # A goalie's season save percentage is pulled this far toward the league's.
 GOALIE_TRUST = 0.6
@@ -366,7 +368,8 @@ def rest_of_game(
         shots_text = (team.get("stats") or {}).get("shots")
         shots = _int(shots_text) if shots_text not in (None, "") else None
         if shots is not None and elapsed > 0:
-            weight = elapsed / (elapsed + PACE_HALF_LIFE_SECONDS)
+            counted = max(0, elapsed - PACE_MIN_SECONDS)
+            weight = counted / (counted + PACE_HALF_LIFE_SECONDS)
             tonight = shots * 3600.0 / elapsed
             rate = (1 - weight) * season_rate + weight * tonight
         else:
