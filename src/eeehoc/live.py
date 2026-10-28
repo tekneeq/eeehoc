@@ -12,6 +12,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from eeehoc.penalties import power_plays
 from eeehoc.xg import game_xg
 
 SCOREBOARD_URL = "https://site.web.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"
@@ -484,10 +485,75 @@ def _goals(
                 "scorer": name,
                 "assists": assists,
                 "tag": _goal_tag(play),
+                "strength": str((play.get("strength") or {}).get("abbreviation") or ""),
                 "text": str(play.get("text") or ""),
             }
         )
     return goals
+
+
+_PENALTY_UNITS = {
+    "Minor": [120],
+    "Bench": [120],
+    "Double Minor": [120, 120],
+    "Major": [300],
+    "Match": [300],
+}
+
+
+def _penalties(
+    plays: list[dict[str, Any]], home_id: str, away_id: str, *, ot_seconds: int, playoffs: bool
+) -> list[dict[str, Any]]:
+    """Penalties that cost a team a skater; misconducts and penalty shots do not."""
+    out: list[dict[str, Any]] = []
+    for play in plays:
+        ptype = play.get("type") or {}
+        kind = str(ptype.get("penaltyType") or "")
+        minutes = _int(ptype.get("penaltyMinutes"))
+        units = _PENALTY_UNITS.get(kind)
+        if units is None and not kind:
+            units = {2: [120], 4: [120, 120], 5: [300]}.get(minutes)
+        if not units:
+            continue
+        side = _team_side((play.get("team") or {}).get("id"), home_id, away_id)
+        period = _int((play.get("period") or {}).get("number"))
+        clock = str((play.get("clock") or {}).get("displayValue") or "")
+        at = play_game_seconds(clock, period, playoffs=playoffs, ot_seconds=ot_seconds)
+        if side is None or at is None:
+            continue
+        participants = play.get("participants") or []
+        who = str(((participants[0] if participants else {}).get("athlete") or {}).get("shortName") or "")
+        what = str(ptype.get("text") or "penalty")
+        label = f"{who} {what.lower()}".strip() if who else what
+        out.append(
+            {
+                "side": side,
+                "at": at,
+                "units": list(units),
+                "kind": "major" if units[0] >= 300 else "minor",
+                "label": label,
+                "what": what,
+                "who": who,
+                "when": f"{period_name(period)} {clock}" if period <= REGULATION_PERIODS or playoffs else f"OT {clock}",
+            }
+        )
+    return out
+
+
+def _game_end_seconds(game: dict[str, Any], plays: list[dict[str, Any]]) -> int:
+    """How far the clock has run: the scoreboard clock, or the play-by-play if it is ahead."""
+    playoffs = bool(game.get("playoffs"))
+    ot_seconds = _int(game.get("ot_seconds"), 300)
+    latest = 0
+    for play in plays:
+        period = _int((play.get("period") or {}).get("number"))
+        clock = str((play.get("clock") or {}).get("displayValue") or "")
+        at = play_game_seconds(clock, period, playoffs=playoffs, ot_seconds=ot_seconds)
+        if at is not None:
+            latest = max(latest, at)
+    if game.get("state") == "post":
+        return max(latest, REGULATION_PERIODS * PERIOD_SECONDS)
+    return max(latest, _int(game.get("elapsed_sec")))
 
 
 def _indexed(labels: list[Any], stats: list[Any], label: str) -> str:
@@ -695,6 +761,7 @@ def normalize_event(event: dict[str, Any], *, ot_seconds: int = 300, playoffs: b
         "goals": [],
         "period_shots": [],
         "xg": None,
+        "power_plays": None,
         "stars": _stars(status, home["id"], away["id"]),
     }
     if state in ("in", "post"):
@@ -880,9 +947,17 @@ def apply_summary(game: dict[str, Any], summary: dict[str, Any]) -> None:
             playoffs=bool(game.get("playoffs")),
         )
         game["xg"] = game_xg(plays, home_id, away_id, playoffs=bool(game.get("playoffs")))
+        game["power_plays"] = power_plays(
+            _penalties(plays, home_id, away_id, ot_seconds=_int(game.get("ot_seconds"), 300), playoffs=bool(game.get("playoffs"))),
+            [{"side": g["side"], "at": g["at"], "pp": g["tag"].startswith("PP") if g.get("strength") else None} for g in game["goals"]],
+            end=_game_end_seconds(game, plays),
+            live=game["state"] == "in",
+            playoffs=bool(game.get("playoffs")),
+        )
     else:
         game["period_shots"] = []
         game["xg"] = None
+        game["power_plays"] = None
 
     if not game["stars"]:
         header_comp = ((summary.get("header") or {}).get("competitions") or [{}])[0]
