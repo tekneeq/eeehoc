@@ -517,17 +517,86 @@
       })
       .join("");
     const nowX = xAt(now).toFixed(1);
+    const bands = ppBands(game, xAt, axisY);
     return `
-      <svg class="goal-tl" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Goal times, home above the line and away below. ${esc(game.home.abbr)} ${esc(game.home.score)}, ${esc(game.away.abbr)} ${esc(game.away.score)}">
+      <svg class="goal-tl" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Goal times, home above the line and away below, with power plays shaded on the line. ${esc(game.home.abbr)} ${esc(game.home.score)}, ${esc(game.away.abbr)} ${esc(game.away.score)}">
         <text x="1" y="12" class="tl-side" fill="${teamColor(game.home)}">${esc(game.home.abbr)}</text>
         <text x="1" y="44" class="tl-side" fill="${teamColor(game.away)}">${esc(game.away.abbr)}</text>
         <line x1="${padL}" y1="${axisY}" x2="${W - padR}" y2="${axisY}" class="tl-axis"/>
         <line x1="${padL}" y1="${axisY}" x2="${nowX}" y2="${axisY}" class="tl-progress"/>
+        ${bands}
         ${game.state === "in" ? `<line x1="${nowX}" y1="8" x2="${nowX}" y2="${H - 14}" class="tl-now"/>` : ""}
         ${tickMarks}
         <text x="${padL}" y="${H - 2}" class="tl-label">0</text>
         ${marks}
-      </svg>`;
+      </svg>${ppLine(game)}`;
+  }
+
+  function mmss(sec) {
+    const s = Math.max(0, Math.round(sec));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  // Elapsed clock of a game second, the way penalties are written on the game sheet.
+  function clockAt(sec, game, isEnd = false) {
+    const reg = 3600;
+    // The last second of a period belongs to that period ("3rd 20:00", not "OT 0:00").
+    const probe = isEnd && sec > 0 ? sec - 1 : sec;
+    if (probe < reg || game.playoffs) {
+      const p = Math.floor(probe / 1200);
+      const name = p < 3 ? ["1st", "2nd", "3rd"][p] : periodHead(p, game.playoffs);
+      return `${name} ${mmss(sec - p * 1200)}`;
+    }
+    return `OT ${mmss(sec - reg)}`;
+  }
+
+  function ppSpanTitle(game, s) {
+    const team = game[s.side];
+    const other = game[s.side === "home" ? "away" : "home"];
+    const length = s.end - s.start;
+    const pens = (s.penalties || []).map((p) => `${p.label} (${p.when}${p.ended_by_goal ? ", ended by the goal" : ""})`).join("; ");
+    const goals = s.goals ? ` · ${plural(s.goals, "goal")}` : "";
+    const open = s.open ? " so far" : "";
+    return `${team.abbr} power play · ${s.strength} · ${clockAt(s.start, game)} → ${clockAt(s.end, game, true)} (${mmss(length)}${open})${goals} · ${other.abbr} penalties: ${pens}`;
+  }
+
+  function ppBands(game, xAt, axisY) {
+    const spans = game.power_plays?.spans || [];
+    return spans
+      .map((s) => {
+        const home = s.side === "home";
+        const color = teamColor(game[s.side]);
+        const segs = s.segments || [{ start: s.start, end: s.end, strength: s.strength }];
+        const rects = segs
+          .map((seg) => {
+            const [up, down] = seg.strength.split("-on-").map(Number);
+            const thick = up - down >= 2 ? 10 : 6;
+            const x1 = xAt(seg.start);
+            const w = Math.max(1.5, xAt(seg.end) - x1);
+            const y = home ? axisY - 1 - thick : axisY + 1;
+            return `<rect x="${x1.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${thick}" fill="${color}"${s.open && seg === segs[segs.length - 1] ? ' class="open"' : ""}/>`;
+          })
+          .join("");
+        return `<g class="tl-pp${s.goals ? " scored" : ""}"><title>${esc(ppSpanTitle(game, s))}</title>${rects}</g>`;
+      })
+      .join("");
+  }
+
+  function ppLine(game) {
+    const pp = game.power_plays;
+    if (!pp) return "";
+    const side = (key) => {
+      const team = game[key];
+      const t = pp[key] || {};
+      const spans = (pp.spans || []).filter((s) => s.side === key);
+      if (!t.count && !spans.length) return `<span class="pp-team" style="--team:${teamColor(team)}"><b>${esc(team.abbr)}</b> none</span>`;
+      const open = spans.some((s) => s.open);
+      const title = `${team.abbr}: ${plural(t.count, "power play")}, ${mmss(t.seconds)} with the extra skater${open ? " so far" : ""}, ${plural(t.goals, "goal")}${team.stats?.power_play ? ` · box score ${team.stats.power_play}` : ""}\n${spans.map((s) => `• ${ppSpanTitle(game, s)}`).join("\n")}`;
+      return `<span class="pp-team${open ? " live" : ""}" style="--team:${teamColor(team)}" title="${esc(title)}"><b>${esc(team.abbr)}</b> ${t.count} PP · ${mmss(t.seconds)}${t.goals ? ` · ${t.goals} G` : ""}</span>`;
+    };
+    return `<div class="pp-line" title="Power plays: how many each side had, how long they had the extra skater in total, and the goals they scored with it. The shaded blocks on the line above are the same spans, home above and away below.">
+        ${side("away")}<span class="pp-label">PP</span>${side("home")}
+      </div>`;
   }
 
   function pairRow(label, awayHtml, homeHtml) {

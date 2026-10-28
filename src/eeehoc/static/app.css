@@ -1635,6 +1635,55 @@ body.chiclet-dragging {
   stroke-width: 2;
 }
 
+/* Power plays: a block on the line for each span, home above and away below, thicker for 5-on-3. */
+.tl-pp rect {
+  opacity: 0.42;
+}
+
+.tl-pp.scored rect {
+  opacity: 0.6;
+}
+
+.tl-pp rect.open {
+  opacity: 0.75;
+}
+
+.pp-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.1rem;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-line .pp-label {
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pp-team {
+  white-space: nowrap;
+}
+
+.pp-team:last-child {
+  text-align: right;
+}
+
+.pp-team b {
+  color: var(--team);
+  font-weight: 700;
+}
+
+.pp-team.live {
+  color: var(--text);
+}
+
 .tl-goal circle {
   stroke: #04140c;
   stroke-width: 0.7;
