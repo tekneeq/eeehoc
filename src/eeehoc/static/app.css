@@ -1637,7 +1637,7 @@ body.chiclet-dragging {
 
 /* Power plays: a block on the line for each span, home above and away below, thicker for 5-on-3. */
 .tl-pp rect {
-  opacity: 0.42;
+  opacity: 0.5;
 }
 
 .tl-pp.scored rect {
