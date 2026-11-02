@@ -951,3 +951,17 @@ def test_roster_goalie_without_a_stats_page_sorts_as_zero_starts():
     # Prospect and DiPietro both have 0 starts; the name puts the prospect second.
     assert home["goalies"][1]["depth"] == 3
     assert home["goalies"][1]["starts"] == 0
+
+
+def test_goal_tags_follow_the_strength_on_the_play():
+    from eeehoc.live import _goal_tag
+
+    assert _goal_tag({"strength": {"abbreviation": "power-play"}, "text": "A Goal (1)"}) == "PP"
+    assert _goal_tag({"strength": {"abbreviation": "short-handed"}, "text": "A Goal (1)"}) == "SH"
+    assert _goal_tag({"strength": {"abbreviation": "empty-net", "text": "Empty Net"}, "text": "A Goal (1) Wrist Shot"}) == "EN"
+    assert _goal_tag({"strength": {"abbreviation": "penalty-shot"}, "text": "A Goal (1)"}) == "PS"
+    assert _goal_tag({"strength": {"abbreviation": "even-strength"}, "text": "A Goal (1)"}) == ""
+    # Older plays only say so in the text
+    assert _goal_tag({"strength": {"abbreviation": "even-strength"}, "text": "A Goal (1) Empty Net"}) == "EN"
+    assert _goal_tag({"strength": {"abbreviation": "short-handed"}, "text": "A Goal (1) empty-net"}) == "SH EN"
+
