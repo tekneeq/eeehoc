@@ -779,6 +779,18 @@ body.chiclet-dragging {
   color: var(--warn);
 }
 
+/* Empty-net goals read muted: the game was already decided; short-handed ones read ice. */
+.goal .tag.en,
+.team-row .scorer small.en {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.goal .tag.sh,
+.team-row .scorer small.sh {
+  color: var(--ice);
+}
+
 /* Shots on goal per goal: season and last five, to score and to allow. */
 .spg {
   display: flex;

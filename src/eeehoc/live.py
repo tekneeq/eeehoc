@@ -422,15 +422,15 @@ def situation_from_summary(summary: dict[str, Any], home_id: str, away_id: str) 
     }
 
 
+_STRENGTH_TAGS = {"power-play": "PP", "short-handed": "SH", "empty-net": "EN", "penalty-shot": "PS"}
+
+
 def _goal_tag(play: dict[str, Any]) -> str:
+    """PP, SH, EN (into an empty net) or PS, from ESPN's strength on the play."""
     abbr = str((play.get("strength") or {}).get("abbreviation") or "")
     text = str(play.get("text") or "").lower()
-    tag = ""
-    if abbr == "power-play":
-        tag = "PP"
-    elif abbr == "short-handed":
-        tag = "SH"
-    if "empty net" in text or "empty-net" in text:
+    tag = _STRENGTH_TAGS.get(abbr, "")
+    if "EN" not in tag and ("empty net" in text or "empty-net" in text):
         tag = f"{tag} EN".strip()
     return tag
 

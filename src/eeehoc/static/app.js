@@ -240,6 +240,19 @@
     return (parts.length > 1 ? parts[parts.length - 1] : raw).replace(/\.$/, "");
   }
 
+  const TAG_WORDS = { PP: "power play", SH: "short-handed", EN: "empty net", PS: "penalty shot" };
+
+  function tagWord(tag) {
+    return String(tag || "")
+      .split(/\s+/)
+      .map((t) => TAG_WORDS[t] || t)
+      .join(", ");
+  }
+
+  function tagClass(tag) {
+    return /\bEN\b/.test(tag || "") ? "en" : /\bSH\b/.test(tag || "") ? "sh" : "";
+  }
+
   // League SV% rank with that save percentage, depth by starts, games started, and the club's record.
   function goalieTags(rank, savePct, depth, starts, record) {
     const tags = [];
@@ -405,7 +418,7 @@
     if (!goals.length) return "";
     return `<span class="scorers">${goals
       .map((g) => {
-        const tag = g.tag ? `<small>${esc(g.tag)}</small>` : "";
+        const tag = g.tag ? `<small class="${tagClass(g.tag)}">${esc(g.tag)}</small>` : "";
         return `<span class="scorer" title="${esc(g.text || "")}"><b>${esc(g.when || "")}</b>${esc(g.scorer || "")}${tag}</span>`;
       })
       .join("")}</span>`;
@@ -447,7 +460,7 @@
           <div class="goal" style="--team:${color}" title="${esc(g.text || "")}">
             <span class="when">${esc(g.when)}</span>
             <span class="who"><b>${esc(g.scorer)}</b>${assists}</span>
-            ${g.tag ? `<span class="tag">${esc(g.tag)}</span>` : "<span></span>"}
+            ${g.tag ? `<span class="tag ${tagClass(g.tag)}" title="${esc(tagWord(g.tag))}">${esc(g.tag)}</span>` : "<span></span>"}
           </div>`;
       })
       .join("")}</div>`;
@@ -505,8 +518,13 @@
         const y1 = home ? axisY - 16 : axisY + 2;
         const y2 = home ? axisY - 2 : axisY + 16;
         const cy = home ? axisY - 11 : axisY + 11;
-        const title = [g.when, g.score, g.scorer, g.tag].filter(Boolean).join(" ");
-        return `<g class="tl-goal"><title>${esc(title)}</title><line x1="${x.toFixed(1)}" y1="${y1}" x2="${x.toFixed(1)}" y2="${y2}" stroke="${color}"/><circle cx="${x.toFixed(1)}" cy="${cy}" r="3.3" fill="${color}"/></g>`;
+        const title = [g.when, g.score, g.scorer, g.tag ? `(${tagWord(g.tag)})` : ""].filter(Boolean).join(" ");
+        const en = /\bEN\b/.test(g.tag || "");
+        // An empty-net goal is a hollow dot: it went into a net with no goalie in it.
+        const dot = en
+          ? `<circle cx="${x.toFixed(1)}" cy="${cy}" r="3" fill="#04140c" stroke="${color}" stroke-width="1.6"/>`
+          : `<circle cx="${x.toFixed(1)}" cy="${cy}" r="3.3" fill="${color}"/>`;
+        return `<g class="tl-goal${en ? " en" : ""}"><title>${esc(title)}</title><line x1="${x.toFixed(1)}" y1="${y1}" x2="${x.toFixed(1)}" y2="${y2}" stroke="${color}"/>${dot}</g>`;
       })
       .join("");
     const tickMarks = ticks
