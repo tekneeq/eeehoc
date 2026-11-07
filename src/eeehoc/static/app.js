@@ -253,19 +253,21 @@
     return /\bEN\b/.test(tag || "") ? "en" : /\bSH\b/.test(tag || "") ? "sh" : "";
   }
 
-  // League SV% rank with that save percentage, depth by starts, games started, and the club's record.
-  function goalieTags(rank, savePct, depth, starts, record) {
+  // League SV% rank with that save percentage, depth by starts, games started,
+  // goals allowed per game, and the club's record.
+  function goalieTags(rank, savePct, depth, starts, record, gaPerGame) {
     const tags = [];
     const ranked = [rank, savePct].filter(Boolean).join(" ");
     if (ranked) tags.push(ranked);
     if (depth) tags.push(`D${depth}`);
     if (starts === 0 || Number.isFinite(starts)) tags.push(`${starts} GS`);
+    if (gaPerGame) tags.push(`${gaPerGame} GA/G`);
     if (record) tags.push(record);
     return tags;
   }
 
-  function rankLine(rank, savePct, depth, starts) {
-    return goalieTags(rank, savePct, depth, starts, "").join("  ");
+  function rankLine(rank, savePct, depth, starts, gaPerGame) {
+    return goalieTags(rank, savePct, depth, starts, "", gaPerGame).join("  ");
   }
 
   function goalieTip(team, played) {
@@ -274,6 +276,7 @@
     if (team.goalie_save_pct) {
       bits.push(team.goalie_rank ? `SV% ${team.goalie_save_pct} (${team.goalie_rank})` : `SV% ${team.goalie_save_pct}`);
     } else if (team.goalie_rank) bits.push(`SV% ${team.goalie_rank}`);
+    if (team.goalie_ga_per_game) bits.push(`${team.goalie_ga_per_game} goals allowed per game`);
     if (team.goalie_gaa) bits.push(`GAA ${team.goalie_gaa}`);
     if (team.goalie_depth) bits.push(`depth ${team.goalie_depth} by starts`);
     if (team.goalie_starts === 0 || Number.isFinite(team.goalie_starts)) bits.push(`${team.goalie_starts} starts`);
@@ -284,7 +287,14 @@
 
   function starterCaption(team) {
     const name = team.goalie || "TBD";
-    const tags = goalieTags(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts, team.record);
+    const tags = goalieTags(
+      team.goalie_rank,
+      team.goalie_save_pct,
+      team.goalie_depth,
+      team.goalie_starts,
+      team.record,
+      team.goalie_ga_per_game
+    );
     return tags.length ? `${name} ${tags.join(" ")}` : name;
   }
 
@@ -295,15 +305,18 @@
     const detailBits = [];
     if (team.goalie_depth) detailBits.push(`D${team.goalie_depth}`);
     if (team.goalie_starts === 0 || Number.isFinite(team.goalie_starts)) detailBits.push(`${team.goalie_starts} GS`);
-    const stats = [rank, detailBits.join(" · "), team.record || ""].filter(Boolean);
+    const gaLine = team.goalie_ga_per_game ? `${team.goalie_ga_per_game} GA/G` : "";
+    const stats = [rank, detailBits.join(" · "), gaLine, team.record || ""].filter(Boolean);
     const color = teamColor(team);
     const played = (team.goalies || []).find((g) => g && g.name);
-    const nameY = stats.length ? 28 : 42.5;
-    const rowH = 9.6;
-    const firstStatY = 40;
+    // Four lines (rank, depth/starts, goals allowed per game, record) need a tighter stack.
+    const crowded = stats.length >= 4;
+    const nameY = stats.length ? (crowded ? 25.5 : 28) : 42.5;
+    const rowH = crowded ? 8.15 : 9.6;
+    const firstStatY = crowded ? 35.2 : 40;
     const lastY = stats.length ? firstStatY + (stats.length - 1) * rowH : nameY;
-    const plateTop = stats.length ? 20 : 34;
-    const plateBottom = stats.length ? Math.min(66, lastY + 5.5) : 51;
+    const plateTop = stats.length ? (crowded ? 17.2 : 20) : 34;
+    const plateBottom = stats.length ? Math.min(crowded ? 72 : 66, lastY + (crowded ? 4.6 : 5.5)) : 51;
     const plateW = 60;
     const statText = stats
       .map((text, i) => {
@@ -331,7 +344,7 @@
     const awayG = netminder(game.away);
     const homeG = netminder(game.home);
     const caption = (team, name) =>
-      [team.abbr, name, rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts), team.record].filter(Boolean).join(" ");
+      [team.abbr, name, rankLine(team.goalie_rank, team.goalie_save_pct, team.goalie_depth, team.goalie_starts, team.goalie_ga_per_game), team.record].filter(Boolean).join(" ");
     const who = [awayG && caption(game.away, awayG), homeG && caption(game.home, homeG)].filter(Boolean).join(", ");
     return `
       <svg class="rink" viewBox="0 0 200 85" role="img" aria-label="Rink, last play${who ? `. Goalies ${esc(who)}` : ""}">
@@ -631,7 +644,7 @@
     if (!list || !list.length) return "";
     return list
       .map((g) => {
-        const tags = goalieTags(g.rank, g.save_pct_season, g.depth, g.starts, team && team.record).join(" · ");
+        const tags = goalieTags(g.rank, g.save_pct_season, g.depth, g.starts, team && team.record, g.ga_per_game).join(" · ");
         const bits = [tags, g.saves && `${g.saves} SV`, g.save_pct, g.goals_against !== "" && g.goals_against !== undefined ? `${g.goals_against} GA` : "", g.toi]
           .filter(Boolean)
           .join(" · ");

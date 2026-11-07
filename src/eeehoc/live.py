@@ -609,16 +609,18 @@ def goalie_rates(overview: dict[str, Any] | None) -> tuple[str, str, str]:
     )
 
 
-def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int, int] | None:
-    """``(games, games started)`` for ``season_year``.
+def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int, int, int | None] | None:
+    """``(games, games started, goals against)`` for ``season_year``.
 
-    ``None`` when the stats payload never arrived. ``(0, 0)`` when it did
-    and this season has no row yet. A mid-season trade is two rows; both count.
+    ``None`` when the stats payload never arrived. ``(0, 0, None)`` when it did
+    and this season has no row yet. Goals against is ``None`` when that column
+    is missing. A mid-season trade is two rows; both count.
     """
     if payload is None or season_year <= 0:
         return None
-    games = starts = 0
+    games = starts = goals_against = 0
     found = False
+    saw_goals_against = False
     for cat in payload.get("categories") or []:
         names = [str(name) for name in cat.get("names") or []]
         try:
@@ -626,6 +628,7 @@ def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int
             starts_at = names.index("gameStarted")
         except ValueError:
             continue
+        goals_at = names.index("goalsAgainst") if "goalsAgainst" in names else None
         for row in cat.get("statistics") or []:
             if _int((row.get("season") or {}).get("year")) != season_year:
                 continue
@@ -633,9 +636,22 @@ def season_starts(payload: dict[str, Any] | None, season_year: int) -> tuple[int
             found = True
             games += _int(values[games_at]) if games_at < len(values) else 0
             starts += _int(values[starts_at]) if starts_at < len(values) else 0
+            if goals_at is not None:
+                saw_goals_against = True
+                goals_against += _int(values[goals_at]) if goals_at < len(values) else 0
     if not found:
-        return (0, 0)
-    return games, starts
+        return (0, 0, None)
+    return games, starts, goals_against if saw_goals_against else None
+
+
+def goals_allowed_per_game(row: tuple[int, int, int | None] | None) -> str:
+    """Goals against divided by games played, to two decimals.
+
+    Empty when the goals-against column is missing or the goalie has no games.
+    """
+    if not row or row[2] is None or row[0] <= 0:
+        return ""
+    return f"{row[2] / row[0]:.2f}"
 
 
 def roster_goalies(payload: dict[str, Any] | None) -> list[dict[str, str]]:
@@ -1040,7 +1056,7 @@ class LiveFeed:
         return found
 
     def _annotate_goalies(self, board: dict[str, Any], now: float) -> None:
-        """Attach SV% rank, starts-based depth, and games started to each goalie.
+        """Attach SV% rank, starts-based depth, games started, and goals allowed per game.
 
         The team record already lives on the competitor; the rink prints it
         beside the goalie's name. Depth is not ESPN's published chart (that
@@ -1094,7 +1110,7 @@ class LiveFeed:
         )
         cards = self._load_cached(jobs, now)
 
-        counted: dict[str, tuple[int, int]] = {}
+        counted: dict[str, tuple[int, int, int | None]] = {}
         for goalie_id in stat_ids:
             row = season_starts(cards.get(f"stats:{goalie_id}:{season}"), season)
             if row is not None:
@@ -1139,6 +1155,7 @@ class LiveFeed:
             goalie["rank"] = rank
             goalie["save_pct_season"] = save_pct
             goalie["gaa"] = gaa
+            goalie["ga_per_game"] = goals_allowed_per_game(counted_row)
             goalie["starts"] = counted_row[1] if counted_row else None
             goalie["depth"] = (depths.get(team_id) or {}).get(goalie_id)
 
@@ -1155,6 +1172,7 @@ class LiveFeed:
                 team["goalie_starts"] = named.get("starts")
                 team["goalie_save_pct"] = named.get("save_pct_season") or ""
                 team["goalie_gaa"] = named.get("gaa") or ""
+                team["goalie_ga_per_game"] = named.get("ga_per_game") or ""
                 continue
             if named is not None:
                 continue
@@ -1168,6 +1186,7 @@ class LiveFeed:
             team["goalie_starts"] = counted_row[1] if counted_row else None
             team["goalie_save_pct"] = save_pct
             team["goalie_gaa"] = gaa
+            team["goalie_ga_per_game"] = goals_allowed_per_game(counted_row)
 
     def _build(self, now: float, dates: str | None) -> dict[str, Any]:
         board = normalize_scoreboard(self._fetch(scoreboard_url(dates)))

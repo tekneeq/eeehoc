@@ -634,7 +634,7 @@ def test_dashboard_live_outage_is_502():
 
 
 def test_rank_label_depth_and_season_starts():
-    from eeehoc.live import depth_by_starts, goalie_rates, rank_label, roster_goalies, season_starts
+    from eeehoc.live import depth_by_starts, goalie_rates, goals_allowed_per_game, rank_label, roster_goalies, season_starts
 
     assert rank_label("8th", 8) == "#8"
     assert rank_label("Tied-1st", 1) == "T1"
@@ -669,11 +669,27 @@ def test_rank_label_depth_and_season_starts():
             }
         ]
     }
-    assert season_starts(stats, 2027) == (5, 3)
-    assert season_starts(stats, 2025) == (0, 0)
+    assert season_starts(stats, 2027) == (5, 3, None)
+    assert season_starts(stats, 2025) == (0, 0, None)
     assert season_starts(None, 2027) is None
-    assert season_starts({}, 2027) == (0, 0)
-    assert season_starts({"categories": []}, 2027) == (0, 0)
+    assert season_starts({}, 2027) == (0, 0, None)
+    assert season_starts({"categories": []}, 2027) == (0, 0, None)
+    traded = {
+        "categories": [
+            {
+                "names": ["games", "gameStarted", "goalsAgainst"],
+                "statistics": [
+                    {"season": {"year": 2027}, "stats": ["2", "2", "5"]},
+                    {"season": {"year": 2027}, "stats": ["3", "1", "8"]},
+                ],
+            }
+        ]
+    }
+    assert season_starts(traded, 2027) == (5, 3, 13)
+    assert goals_allowed_per_game((5, 3, 13)) == "2.60"
+    assert goals_allowed_per_game((0, 0, 0)) == ""
+    assert goals_allowed_per_game((5, 3, None)) == ""
+    assert goals_allowed_per_game(None) == ""
 
     assert roster_goalies(
         {
@@ -782,12 +798,17 @@ def _goalie_board():
     }
 
 
-def _counting(games, starts):
+def _counting(games, starts, goals_against=None):
+    names = ["games", "gameStarted"]
+    values = [str(games), str(starts)]
+    if goals_against is not None:
+        names.append("goalsAgainst")
+        values.append(str(goals_against))
     return {
         "categories": [
             {
-                "names": ["games", "gameStarted"],
-                "statistics": [{"season": {"year": 2027}, "stats": [str(games), str(starts)]}],
+                "names": names,
+                "statistics": [{"season": {"year": 2027}, "stats": values}],
             }
         ]
     }
@@ -852,13 +873,13 @@ def _goalie_fetch(calls, *, roster_error=False, backup_stats_error=False, prospe
         if url.endswith("/athletes/999/stats"):
             raise RuntimeError("Live feed HTTP 404 for https://example.test/athletes/999/stats")
         if url.endswith("/athletes/4712036/stats"):
-            return _counting(5, 5)
+            return _counting(5, 5, 12)
         if url.endswith("/athletes/4392765/stats"):
             if backup_stats_error:
                 raise RuntimeError("stats down")
             return {"categories": [{"names": ["games", "gameStarted"], "statistics": []}]}
         if url.endswith("/athletes/123/stats"):
-            return _counting(4, 4)
+            return _counting(4, 4, 10)
         if url.endswith("/athletes/456/stats"):
             return _counting(1, 0)
         if url.endswith("/athletes/4712036"):
@@ -903,11 +924,14 @@ def test_live_feed_ranks_goalie_by_save_pct_and_starts():
     assert home["goalie_starts"] == 5
     assert home["goalie_save_pct"] == ".932"
     assert home["goalie_gaa"] == "1.98"
+    assert home["goalie_ga_per_game"] == "2.40"
     assert [goalie["name"] for goalie in home["goalies"]] == ["J. Swayman", "M. DiPietro"]
     assert home["goalies"][0]["id"] == "4712036"
     assert home["goalies"][0]["rank"] == "#8"
     assert home["goalies"][0]["depth"] == 1
     assert home["goalies"][0]["starts"] == 5
+    assert home["goalies"][0]["ga_per_game"] == "2.40"
+    assert home["goalies"][1]["ga_per_game"] == ""
     assert home["goalies"][1]["depth"] == 2
     assert home["goalies"][1]["starts"] == 0
     assert home["goalies"][1]["rank"] == ""
@@ -919,6 +943,7 @@ def test_live_feed_ranks_goalie_by_save_pct_and_starts():
     assert upcoming["home"]["goalie_rank"] == "T1"
     assert upcoming["home"]["goalie_depth"] == 1
     assert upcoming["home"]["goalie_starts"] == 4
+    assert upcoming["home"]["goalie_ga_per_game"] == "2.50"
 
     before = len(calls)
     feed._boards[""] = (0.0, feed._boards[""][1])  # noqa: SLF001 - expire the scoreboard, keep goalie cards
