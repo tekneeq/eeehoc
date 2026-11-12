@@ -686,18 +686,30 @@ body.chiclet-dragging {
   color: var(--muted);
 }
 
-.ice-toi {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.55rem;
+.ice-grid {
+  display: grid;
+  gap: 0.04rem 0.35rem;
+  align-items: baseline;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.ice-toi i {
-  font-style: normal;
+.ice-grid .ice-h,
+.ice-grid span:not(.ice-lab) {
+  text-align: right;
 }
 
-.ice-toi i.on {
+.ice-grid .ice-h {
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ice-grid .ice-lab {
+  font-weight: 700;
+}
+
+.ice-grid .on {
   color: var(--text);
   font-weight: 700;
 }

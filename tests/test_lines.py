@@ -108,10 +108,12 @@ def test_live_lines_name_who_is_out_and_how_long_each_unit_has_played():
     )
     assert ice is not None
     assert ice["through"] == "3rd 20:00"
+    assert [period["label"] for period in ice["periods"]] == ["1st", "2nd", "3rd"]
     away = ice["away"]
     assert [line["players"] for line in away["lines"]] == [["101", "102", "103"], ["104", "105", "106"]]
     assert away["lines"][0]["seconds"] == 1890 and away["lines"][0]["on"] is True
-    assert away["lines"][1]["seconds"] == 1710 and away["lines"][1]["on"] is False
+    assert away["lines"][0]["by_period"] == [630, 630, 630]
+    assert away["lines"][1]["seconds"] == 1710 and away["lines"][1]["by_period"] == [570, 570, 570] and away["lines"][1]["on"] is False
     assert away["pairs"][0]["on"] is True and away["pairs"][0]["seconds"] == 1890
     assert away["on_forwards"] == ["101", "102", "103"]
     assert all(not line["on"] for line in ice["home"]["lines"])
