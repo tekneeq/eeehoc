@@ -12,8 +12,10 @@ from eeehoc.live import (
     REGULATION_PERIODS,
     SUMMARY_URL,
     FetchJson,
+    _goalies,
     _int,
     _team_side,
+    _toi_seconds,
     fetch_json,
     period_shot_lines,
 )
@@ -110,6 +112,11 @@ def summarize_game(summary: dict[str, Any], team_id: str) -> dict[str, Any] | No
     won = bool(me.get("winner")) or (not them.get("winner") and scored > allowed)
     detail = str(stype.get("shortDetail") or stype.get("detail") or "Final")
     opponent = them.get("team") or {}
+    played = []
+    for goalie in _goalies(summary, home_id, away_id).get(my_side) or []:
+        if _toi_seconds(str(goalie.get("toi") or "")) <= 0 or not goalie.get("name"):
+            continue
+        played.append({"id": str(goalie.get("id") or ""), "name": str(goalie["name"])})
     return {
         "id": str(header.get("id") or comp.get("id") or ""),
         "date": str(comp.get("date") or ""),
@@ -124,6 +131,7 @@ def summarize_game(summary: dict[str, Any], team_id: str) -> dict[str, Any] | No
         "season_type": season_type,
         "preseason": season_type == PRESEASON_TYPE,
         "periods": periods,
+        "goalies": played,
     }
 
 

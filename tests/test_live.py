@@ -935,6 +935,10 @@ def test_live_feed_ranks_goalie_by_save_pct_and_starts():
     assert home["goalies"][1]["depth"] == 2
     assert home["goalies"][1]["starts"] == 0
     assert home["goalies"][1]["rank"] == ""
+    assert home["goalie_chart"] == [
+        {"id": "4712036", "name": "Swayman", "depth": 1, "starts": 5},
+        {"id": "4392765", "name": "DiPietro", "depth": 2, "starts": 0},
+    ]
     assert "goalie_rank" not in live["away"]
 
     upcoming = next(game for game in board["games"] if game["id"] == "2")
@@ -944,6 +948,10 @@ def test_live_feed_ranks_goalie_by_save_pct_and_starts():
     assert upcoming["home"]["goalie_depth"] == 1
     assert upcoming["home"]["goalie_starts"] == 4
     assert upcoming["home"]["goalie_ga_per_game"] == "2.50"
+    assert upcoming["home"]["goalie_chart"] == [
+        {"id": "123", "name": "Georgiev", "depth": 1, "starts": 4},
+        {"id": "456", "name": "Backup", "depth": 2, "starts": 0},
+    ]
 
     before = len(calls)
     feed._boards[""] = (0.0, feed._boards[""][1])  # noqa: SLF001 - expire the scoreboard, keep goalie cards
@@ -964,6 +972,7 @@ def test_goalie_depth_is_omitted_when_the_chart_is_incomplete():
         assert home["record"] == "4-2-0"
         assert home["goalie_depth"] is None
         assert home["goalies"][0]["depth"] is None
+        assert "goalie_chart" not in home
 
 
 def test_roster_goalie_without_a_stats_page_sorts_as_zero_starts():
@@ -976,6 +985,7 @@ def test_roster_goalie_without_a_stats_page_sorts_as_zero_starts():
     # Prospect and DiPietro both have 0 starts; the name puts the prospect second.
     assert home["goalies"][1]["depth"] == 3
     assert home["goalies"][1]["starts"] == 0
+    assert [row["name"] for row in home["goalie_chart"]] == ["Swayman", "Prospect", "DiPietro"]
 
 
 def test_on_ice_players_skip_the_bench_and_the_goalie():
