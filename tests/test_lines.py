@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from eeehoc.lines import NHL_PBP_URL, NHL_SCHEDULE_URL, NHL_SHIFTS_URL, LineSource, game_lines, nhl_abbr
+from eeehoc.lines import NHL_PBP_URL, NHL_SCHEDULE_URL, NHL_SHIFTS_URL, LineSource, game_lines, live_lines, nhl_abbr, together_seconds
 
 AWAY, HOME = 10, 20
 # Away forwards 101-106 (two trios), defence 107-110 (two pairs), goalie 111.
@@ -97,6 +97,62 @@ def test_game_lines_groups_units_and_credits_the_line_on_the_ice():
 def test_game_lines_needs_a_shift_chart_and_rosters():
     assert game_lines(_pbp([]), {"data": []}) is None
     assert game_lines({"homeTeam": {"id": HOME}, "awayTeam": {"id": AWAY}, "rosterSpots": []}, _shifts()) is None
+
+
+def test_live_lines_name_who_is_out_and_how_long_each_unit_has_played():
+    # L1/D1 share every even-minute shift plus the opening 90s: 630s a period, 1890s a game.
+    ice = live_lines(
+        _pbp([]),
+        _shifts(),
+        {"away": [{"name": "P. 101", "position": "C"}, {"name": "P. 102", "position": "L"}, {"name": "P. 103", "position": "R"}, {"name": "P. 107", "position": "D"}, {"name": "P. 108", "position": "D"}], "home": []},
+    )
+    assert ice is not None
+    assert ice["through"] == "3rd 20:00"
+    away = ice["away"]
+    assert [line["players"] for line in away["lines"]] == [["101", "102", "103"], ["104", "105", "106"]]
+    assert away["lines"][0]["seconds"] == 1890 and away["lines"][0]["on"] is True
+    assert away["lines"][1]["seconds"] == 1710 and away["lines"][1]["on"] is False
+    assert away["pairs"][0]["on"] is True and away["pairs"][0]["seconds"] == 1890
+    assert away["on_forwards"] == ["101", "102", "103"]
+    assert all(not line["on"] for line in ice["home"]["lines"])
+
+    mixed = live_lines(
+        _pbp([]),
+        _shifts(),
+        {"away": [{"name": "P. 104", "position": "C"}, {"name": "P. 105", "position": "L"}, {"name": "P. 101", "position": "R"}], "home": []},
+    )
+    assert mixed["away"]["lines"][1]["on"] is True and mixed["away"]["lines"][0]["on"] is False
+
+    one = live_lines(_pbp([]), _shifts(), {"home": [{"name": "P. 201", "position": "C"}], "away": []})
+    assert all(not line["on"] for line in one["home"]["lines"])
+    assert one["home"]["on_forwards"] == ["201"]
+    assert live_lines({}, {"data": []}, {}) is None
+
+    table = {1: [(1, 0, 40)], 2: [(1, 10, 40)], 3: [(1, 0, 25)]}
+    assert together_seconds(table, [1, 2, 3]) == 15
+
+
+def test_line_source_refreshes_a_live_game_on_a_short_ttl():
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if url == NHL_SCHEDULE_URL.format(day="2026-10-14"):
+            return _schedule()
+        if url == NHL_PBP_URL.format(game_id=2026020999):
+            return _pbp([])
+        if url == f"{NHL_SHIFTS_URL.format(game_id=2026020999)}&limit=2000":
+            return _shifts()
+        raise RuntimeError(f"offline {url}")
+
+    source = LineSource(fetch)
+    on = {"away": [{"name": "P. 101", "position": "C"}, {"name": "P. 102", "position": "L"}, {"name": "P. 103", "position": "R"}], "home": []}
+    first = source.for_live("2026-10-14", "LA", "TB", on, playoffs=False, now=1000.0)
+    assert first["away"]["lines"][0]["on"] is True
+    assert source.for_live("2026-10-14", "LA", "TB", on, playoffs=False, now=1010.0)["through"] == first["through"]
+    assert len(calls) == 3
+    source.for_live("2026-10-14", "LA", "TB", on, playoffs=False, now=1025.0)
+    assert len(calls) == 5  # play-by-play and shifts again; the schedule is still fresh
 
 
 def test_nhl_abbreviations():

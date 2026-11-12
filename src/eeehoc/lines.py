@@ -44,6 +44,8 @@ MISS_TTL = 10 * 60.0
 OLD_MISS_TTL = 6 * 60 * 60.0
 OLD_AFTER_DAYS = 2
 SCHEDULE_TTL = 6 * 60 * 60.0
+# The shift chart trails the clock, so a live game is re-read about as often as the scoreboard.
+LIVE_CHART_TTL = 20.0
 
 LINES_NOTE = (
     "Lines L1–L4 and pairs D1–D3 are read from each game's shift chart: forwards grouped by shared "
@@ -183,6 +185,171 @@ def _unit_index(units: list[list[int]], on_ice: set[int]) -> int | None:
     return best
 
 
+def together_seconds(table: dict[int, list[tuple[int, int, int]]], players: list[int]) -> int:
+    """Seconds every player in ``players`` is on the ice at once, any strength."""
+    if not players:
+        return 0
+    need = len(set(players))
+    total = 0
+    periods = {period for pid in players for period, _start, _end in table.get(pid, [])}
+    for period in periods:
+        events: list[tuple[int, int, int]] = []
+        for pid in players:
+            for shift_period, start, end in table.get(pid, []):
+                if shift_period == period:
+                    events.append((start, 1, pid))
+                    events.append((end, -1, pid))
+        # A shift ending at t and another starting at t do not overlap.
+        events.sort(key=lambda item: (item[0], 0 if item[1] < 0 else 1))
+        open_count: dict[int, int] = {}
+        previous: int | None = None
+        together = False
+        for moment, delta, pid in events:
+            if previous is not None and together and moment > previous:
+                total += moment - previous
+            open_count[pid] = open_count.get(pid, 0) + delta
+            if open_count[pid] <= 0:
+                open_count.pop(pid, None)
+            together = len(open_count) >= need
+            previous = moment
+    return total
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [part.strip(".") for part in str(name or "").replace(".", " ").split() if part.strip(".")]
+
+
+def _last_key(name: str) -> str:
+    tokens = _name_tokens(name)
+    return tokens[-1].casefold().replace("'", "").replace("’", "") if tokens else ""
+
+
+def _last_display(name: str) -> str:
+    tokens = _name_tokens(name)
+    return tokens[-1] if tokens else ""
+
+
+def _initial(name: str) -> str:
+    tokens = _name_tokens(name)
+    return tokens[0][:1].casefold() if len(tokens) >= 2 else ""
+
+
+def _match_ids(names: dict[int, str], skaters: list[dict[str, str]]) -> set[int]:
+    """NHL player ids for ESPN short names, by last name and first initial."""
+    by_last: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for pid, name in names.items():
+        by_last[_last_key(name)].append((_initial(name), pid))
+    found: set[int] = set()
+    for skater in skaters:
+        candidates = by_last.get(_last_key(str(skater.get("name") or "")), [])
+        initial = _initial(str(skater.get("name") or ""))
+        exact = [pid for candidate, pid in candidates if initial and candidate == initial]
+        if len(exact) == 1:
+            found.add(exact[0])
+        elif len(candidates) == 1:
+            found.add(candidates[0][1])
+    return found
+
+
+def _through_label(period: int, elapsed: int, *, playoffs: bool) -> str:
+    """How far the shift chart has been published, as elapsed time on the period clock."""
+    name = {1: "1st", 2: "2nd", 3: "3rd", 4: "OT"}.get(period, f"P{period}")
+    length = PERIOD_SECONDS if period <= 3 or playoffs else 5 * 60
+    shown = min(max(0, elapsed), length)
+    return f"{name} {shown // 60}:{shown % 60:02d}"
+
+
+def live_lines(
+    pbp: dict[str, Any] | None,
+    shifts: dict[str, Any] | None,
+    on_ice: dict[str, list[dict[str, str]]] | None,
+    *,
+    playoffs: bool = False,
+) -> dict[str, Any] | None:
+    """Lines and pairs on the ice now, and how long each has been out together.
+
+    Who is out comes from ``on_ice`` (ESPN's live list, short names and positions).
+    The groups and their ice time come from the NHL shift chart, which trails the
+    clock by a few minutes while a game is going. ``None`` when there is nothing
+    to show.
+    """
+    pbp = pbp or {}
+    on_ice = on_ice or {}
+    if not any(on_ice.get(side) for side in ("home", "away")) and not (shifts or {}).get("data"):
+        return None
+    home_id = _int((pbp.get("homeTeam") or {}).get("id"))
+    away_id = _int((pbp.get("awayTeam") or {}).get("id"))
+    table = _shift_table(shifts or {})
+    names: dict[int, str] = {}
+    team_of: dict[int, int] = {}
+    position: dict[int, str] = {}
+    for spot in pbp.get("rosterSpots") or []:
+        pid = _int(spot.get("playerId"))
+        if not pid:
+            continue
+        team_of[pid] = _int(spot.get("teamId"))
+        position[pid] = str(spot.get("positionCode") or "").upper()
+        names[pid] = _player_name(spot)
+    # The shift chart carries names too, for anyone the roster has not listed yet.
+    for row in (shifts or {}).get("data") or []:
+        pid = _int(row.get("playerId"))
+        if pid and pid not in names:
+            names[pid] = " ".join(part for part in (str(row.get("firstName") or ""), str(row.get("lastName") or "")) if part)
+
+    skater = {pid: position.get(pid, "") != "G" for pid in table}
+    even = _even_strength(table, team_of, skater, (away_id, home_id)) if home_id and away_id and table else {}
+    sides = {"home": home_id, "away": away_id}
+    grouped: dict[str, dict[str, list[list[int]]]] = {}
+    for side, tid in sides.items():
+        forwards = [pid for pid in table if team_of.get(pid) == tid and position.get(pid) in FORWARDS]
+        defence = [pid for pid in table if team_of.get(pid) == tid and position.get(pid) == "D"]
+        grouped[side] = {
+            "line": _group_units(forwards, table, even, 3, LINE_COUNT) if even else [],
+            "pair": _group_units(defence, table, even, 2, PAIR_COUNT) if even else [],
+        }
+
+    latest = (0, -1)
+    for rows in table.values():
+        for period, _start, end in rows:
+            if (period, end) > latest:
+                latest = (period, end)
+
+    def show(unit: list[int]) -> list[str]:
+        return [_last_display(names.get(pid, "")) or str(pid) for pid in unit]
+
+    out: dict[str, Any] = {
+        "through": _through_label(latest[0], latest[1], playoffs=playoffs) if latest[0] else "",
+        "home": {},
+        "away": {},
+    }
+    for side in ("home", "away"):
+        skaters = [dict(row) for row in on_ice.get(side) or [] if isinstance(row, dict)]
+        forwards_out = [row for row in skaters if str(row.get("position") or "").upper() not in ("D", "G")]
+        defence_out = [row for row in skaters if str(row.get("position") or "").upper() == "D"]
+        matched = _match_ids({pid: names[pid] for pid in names if team_of.get(pid) == sides[side]}, skaters)
+        lines = grouped[side]["line"]
+        pairs = grouped[side]["pair"]
+        line_at = _unit_index(lines, matched)
+        pair_at = _unit_index(pairs, matched)
+        if line_at is not None and sum(1 for pid in lines[line_at] if pid in matched) < 2:
+            line_at = None
+        if pair_at is not None and sum(1 for pid in pairs[pair_at] if pid in matched) < 2:
+            pair_at = None
+        out[side] = {
+            "lines": [
+                {"label": f"L{index + 1}", "players": show(unit), "seconds": together_seconds(table, unit), "on": index == line_at}
+                for index, unit in enumerate(lines)
+            ],
+            "pairs": [
+                {"label": f"D{index + 1}", "players": show(unit), "seconds": together_seconds(table, unit), "on": index == pair_at}
+                for index, unit in enumerate(pairs)
+            ],
+            "on_forwards": [_last_display(str(row.get("name") or "")) for row in forwards_out if _last_display(str(row.get("name") or ""))],
+            "on_defence": [_last_display(str(row.get("name") or "")) for row in defence_out if _last_display(str(row.get("name") or ""))],
+        }
+    return out
+
+
 def game_lines(pbp: dict[str, Any], shifts: dict[str, Any], *, playoffs: bool = False) -> dict[str, Any] | None:
     """Both sides' lines for one game and the line each goal came from and went in against.
 
@@ -282,6 +449,8 @@ class LineSource:
         self._schedule: dict[str, tuple[float, dict[tuple[str, str], tuple[int, int]]]] = {}
         self._games: dict[int, dict[str, Any]] = {}
         self._misses: dict[str, float] = {}
+        self._live_raw: dict[int, tuple[float, dict[str, Any], dict[str, Any]]] = {}
+        self._live_miss: dict[str, float] = {}
         self._last_error: str | None = None
 
     @property
@@ -342,3 +511,43 @@ class LineSource:
             lines["nhl_id"] = gid
             self._games[gid] = lines
         return lines
+
+    def for_live(
+        self,
+        day: str,
+        away_abbr: str,
+        home_abbr: str,
+        on_ice: dict[str, list[dict[str, str]]] | None,
+        *,
+        playoffs: bool,
+        now: float,
+    ) -> dict[str, Any] | None:
+        """Who is out and how long each line has played, for a game still going."""
+        away, home = nhl_abbr(away_abbr), nhl_abbr(home_abbr)
+        if not day or not away or not home:
+            return None
+        key = f"{day}:{away}@{home}"
+        with self._lock:
+            if now - self._live_miss.get(key, 0.0) < LIVE_CHART_TTL:
+                return None
+        try:
+            gid, _game_type = self._day_games(day, now).get((away, home), (0, 0))
+            if not gid:
+                raise LookupError(f"no NHL game {away} @ {home} on {day}")
+            with self._lock:
+                cached = self._live_raw.get(gid)
+            if cached is not None and now - cached[0] < LIVE_CHART_TTL:
+                pbp, shifts = cached[1], cached[2]
+            else:
+                pbp = self._fetch(NHL_PBP_URL.format(game_id=gid))
+                shifts = self._fetch(f"{NHL_SHIFTS_URL.format(game_id=gid)}&limit=2000")
+                pbp = pbp if isinstance(pbp, dict) else {}
+                shifts = shifts if isinstance(shifts, dict) else {}
+                with self._lock:
+                    self._live_raw[gid] = (now, pbp, shifts)
+        except Exception as exc:  # noqa: BLE001 - the chiclet still renders without lines
+            self._last_error = str(exc)
+            with self._lock:
+                self._live_miss[key] = now
+            return None
+        return live_lines(pbp, shifts, on_ice, playoffs=playoffs)
