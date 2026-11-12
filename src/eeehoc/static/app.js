@@ -1452,7 +1452,7 @@
     const body = side("away") + side("home");
     if (!body) return "";
     const through = ice.through ? `ice time through ${ice.through}` : "shift chart not in yet";
-    const title = `Who is on the ice now, from ESPN. L1–L4 and D1–D3 are the groups sharing the ice tonight, numbered by how much they have played, so the numbers settle as the game goes on. Each column is how long that group was out together in that period, and T is the game so far. Times come from the NHL shift chart, which runs a few minutes behind the clock${ice.through ? ` — ${through}` : ""}.`;
+    const title = `Who is on the ice now, from ESPN. L1–L4 and D1–D3 are the groups sharing the ice tonight, numbered by how much they have played, so the numbers settle as the game goes on. Each column is how long that group was out together in that period, and T is the game so far. Times come from the NHL's live shift reports${ice.through ? ` — ${through}` : ""}.`;
     return `
       <section class="ice-lines" aria-label="Lines on the ice" title="${esc(title)}">
         <div class="spg-head">
