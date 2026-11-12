@@ -13,7 +13,7 @@ from eeehoc.form import FormFeed, summarize_game
 BUF, CBJ, DET, PIT = "2", "29", "5", "16"
 
 
-def _summary(eid, iso, home_id, away_id, home_lines, away_lines, *, detail="Final", season_type=2, plays=None):
+def _summary(eid, iso, home_id, away_id, home_lines, away_lines, *, detail="Final", season_type=2, plays=None, goalies=None):
     home_score = sum(home_lines)
     away_score = sum(away_lines)
     return {
@@ -45,6 +45,30 @@ def _summary(eid, iso, home_id, away_id, home_lines, away_lines, *, detail="Fina
             ],
         },
         "plays": plays or [],
+        **(
+            {
+                "boxscore": {
+                    "players": [
+                        {
+                            "team": {"id": team_id},
+                            "statistics": [
+                                {
+                                    "name": "goalies",
+                                    "labels": ["TOI"],
+                                    "athletes": [
+                                        {"athlete": {"id": goalie_id, "shortName": name}, "stats": [toi]}
+                                        for goalie_id, name, toi in rows
+                                    ],
+                                }
+                            ],
+                        }
+                        for team_id, rows in goalies.items()
+                    ]
+                }
+            }
+            if goalies
+            else {}
+        ),
     }
 
 
@@ -69,7 +93,18 @@ PLAYS_OT = [
 
 SUMMARIES = {
     # BUF @ DET, DET wins in OT 3-2. Lines are DET 1-0-1-1, BUF 1-1-0-0.
-    "ot": _summary("ot", "2026-09-24T23:00Z", DET, BUF, [1, 0, 1, 1], [1, 1, 0, 0], detail="Final/OT", season_type=1, plays=PLAYS_OT),
+    "ot": _summary(
+        "ot",
+        "2026-09-24T23:00Z",
+        DET,
+        BUF,
+        [1, 0, 1, 1],
+        [1, 1, 0, 0],
+        detail="Final/OT",
+        season_type=1,
+        plays=PLAYS_OT,
+        goalies={BUF: [("11", "U. Luukkonen", "58:12"), ("12", "J. Lyon", "0:00")], DET: [("21", "C. Talbot", "60:00")]},
+    ),
     "win": _summary("win", "2026-09-22T23:00Z", BUF, CBJ, [2, 2, 1], [0, 1, 0], season_type=1),
     "reg": _summary("reg", "2026-10-01T23:00Z", CBJ, BUF, [3, 1, 2], [1, 2, 0]),
     "so": _summary("so", "2026-09-26T23:00Z", BUF, PIT, [0, 1, 0, 0, 0], [0, 0, 1, 0, 1], detail="Final/SO", season_type=1),
@@ -136,13 +171,16 @@ def test_summarize_game_is_from_the_teams_side():
     assert (first["sog_f"], first["sog_a"]) == (3, 2)
     assert (first["shots_f"], first["shots_a"]) == (5, 2)
     assert game["periods"][3]["ga"] == 1
+    assert game["goalies"] == [{"id": "11", "name": "U. Luukkonen"}]
 
     det = summarize_game(SUMMARIES["ot"], DET)
     assert det["result"] == "W"
+    assert det["goalies"] == [{"id": "21", "name": "C. Talbot"}]
     assert det["venue"] == "home"
     assert det["periods"][0]["sog_f"] == 2
 
     so = summarize_game(SUMMARIES["so"], BUF)
+    assert so["goalies"] == []
     assert so["result"] == "SOL"
     assert so["periods"][4]["shootout"] is True
 

@@ -715,11 +715,40 @@ def depth_by_starts(rows: list[dict[str, Any]]) -> dict[str, int]:
     ESPN's core depth chart still lists retired goalies, so this order is
     games started this season, then games played, then name.
     """
-    ordered = sorted(
+    return {str(row["id"]): index for index, row in enumerate(_depth_order(rows), start=1)}
+
+
+def _depth_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
         (row for row in rows if row.get("id")),
         key=lambda row: (-_int(row.get("starts")), -_int(row.get("games")), str(row.get("name") or "")),
     )
-    return {str(row["id"]): index for index, row in enumerate(ordered, start=1)}
+
+
+def _chart_name(name: str) -> str:
+    """``J. Swayman`` and ``Jeremy Swayman`` both become ``Swayman``."""
+    tokens = [part.strip(".") for part in str(name or "").replace(".", " ").split() if part.strip(".")]
+    if len(tokens) >= 2 and len(tokens[0]) == 1:
+        tokens = tokens[1:]
+    return tokens[-1] if tokens else ""
+
+
+def goalie_chart(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Named depth chart: last name, 1-based depth, and starts, most starts first.
+
+    Two goalies who share a last name keep the initial (``J. Swayman``).
+    """
+    ordered = _depth_order(rows)
+    lasts = [_chart_name(str(row.get("name") or "")) for row in ordered]
+    shared = {last for last in lasts if last and lasts.count(last) > 1}
+    chart: list[dict[str, Any]] = []
+    for index, (row, last) in enumerate(zip(ordered, lasts), start=1):
+        label = last
+        if not label or last in shared:
+            raw = str(row.get("name") or "").strip()
+            label = raw or last or str(row.get("id") or "")
+        chart.append({"id": str(row["id"]), "name": label, "depth": index, "starts": _int(row.get("starts"))})
+    return chart
 
 
 def _goalies(summary: dict[str, Any], home_id: str, away_id: str) -> dict[str, list[dict[str, str]]]:
@@ -1096,7 +1125,8 @@ class LiveFeed:
 
         The team record already lives on the competitor; the rink prints it
         beside the goalie's name. Depth is not ESPN's published chart (that
-        feed still lists retired goalies). It is 1..n by games started.
+        feed still lists retired goalies). It is 1..n by games started, and
+        ``goalie_chart`` is that order with each goalie's name.
         """
         season = _int(board.get("season"))
         if season <= 0:
@@ -1152,7 +1182,19 @@ class LiveFeed:
             if row is not None:
                 counted[goalie_id] = row
 
+        names: dict[str, dict[str, str]] = {}
+        for team in interesting:
+            bucket = names.setdefault(str(team["id"]), {})
+            for goalie in team.get("goalies") or []:
+                goalie_id = str(goalie.get("id") or "")
+                if goalie_id and goalie.get("name"):
+                    bucket.setdefault(goalie_id, str(goalie["name"]))
+            probable = str(team.get("goalie_id") or "")
+            if probable and team.get("goalie"):
+                bucket.setdefault(probable, str(team["goalie"]))
+
         depths: dict[str, dict[str, int]] = {}
+        charts: dict[str, list[dict[str, Any]]] = {}
         for team_id in team_ids:
             if not roster_ok[team_id]:
                 continue
@@ -1165,7 +1207,14 @@ class LiveFeed:
                 if row is None:
                     complete = False
                     break
-                rows.append({"id": goalie["id"], "name": goalie["name"], "games": row[0], "starts": row[1]})
+                rows.append(
+                    {
+                        "id": goalie["id"],
+                        "name": goalie["name"] or (names.get(team_id) or {}).get(goalie["id"], ""),
+                        "games": row[0],
+                        "starts": row[1],
+                    }
+                )
             if not complete:
                 continue
             for team in interesting:
@@ -1178,12 +1227,20 @@ class LiveFeed:
                     if row is None:
                         complete = False
                         break
-                    rows.append({"id": goalie_id, "name": "", "games": row[0], "starts": row[1]})
+                    rows.append(
+                        {
+                            "id": goalie_id,
+                            "name": (names.get(team_id) or {}).get(goalie_id, ""),
+                            "games": row[0],
+                            "starts": row[1],
+                        }
+                    )
                     seen.add(goalie_id)
                 if not complete:
                     break
             if complete and rows:
                 depths[team_id] = depth_by_starts(rows)
+                charts[team_id] = goalie_chart(rows)
 
         def write(goalie: dict[str, Any], goalie_id: str, team_id: str) -> None:
             rank, save_pct, gaa = goalie_rates(cards.get(f"card:{goalie_id}"))
@@ -1201,6 +1258,9 @@ class LiveFeed:
                 goalie_id = str(goalie.get("id") or "")
                 if goalie_id:
                     write(goalie, goalie_id, team_id)
+            chart = charts.get(team_id)
+            if chart:
+                team["goalie_chart"] = chart
             named = next((goalie for goalie in team.get("goalies") or [] if goalie.get("name")), None)
             if named is not None and named.get("id"):
                 team["goalie_rank"] = named.get("rank") or ""

@@ -1152,13 +1152,33 @@
     return `<span class="f5-cell ${cls}" title="${esc(title)}"><b>${p.gf}–${p.ga}</b><small>${p.shootout ? "SO" : esc(sog)}</small></span>`;
   }
 
+  function formGoalies(team, game) {
+    const chart = new Map((team.goalie_chart || []).map((goalie) => [String(goalie.id), goalie]));
+    return (game.goalies || [])
+      .filter((goalie) => goalie && goalie.name)
+      .map((goalie) => {
+        const known = chart.get(String(goalie.id));
+        const name = (known && known.name) || netminder({ goalies: [goalie] }) || goalie.name;
+        return known ? `${name} D${known.depth}` : name;
+      });
+  }
+
+  function formChart(team) {
+    const chart = team.goalie_chart || [];
+    if (!chart.length) return "";
+    const text = chart.map((goalie) => `${goalie.depth} ${goalie.name}`).join(" · ");
+    const title = `${team.abbr} goalies by games started this season. ${chart.map((goalie) => `${goalie.name}, ${goalie.starts} start${goalie.starts === 1 ? "" : "s"}`).join(". ")}`;
+    return `<span class="f5-chart" title="${esc(title)}">${esc(text)}</span>`;
+  }
+
   function formTeamHtml(team, games, limit) {
     const color = teamColor(team);
+    const chart = formChart(team);
     if (!games) {
-      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">last ${limit}…</span></div>`;
+      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">last ${limit}…</span>${chart}</div>`;
     }
     if (!games.length) {
-      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">no finished games yet</span></div>`;
+      return `<div class="f5-team" style="--team:${color}"><span class="f5-name">${esc(team.abbr)}</span><span class="f5-empty">no finished games yet</span>${chart}</div>`;
     }
     const maxPeriods = Math.max(...games.map((g) => (g.periods || []).length), 3);
     const head = Array.from({ length: maxPeriods }, (_, i) => {
@@ -1171,17 +1191,20 @@
         const cls = res === "W" ? "w" : res === "T" ? "t" : "l";
         const vs = `${g.venue === "home" ? "v" : "@"} ${g.opponent}`;
         const when = fmtFormDate(g.date);
-        const title = `${when ? `${when} · ` : ""}${vs} · ${RESULT_WORD[res] || res} ${g.gf}–${g.ga}${g.detail && /OT|SO/.test(g.detail) ? ` (${g.detail.replace("Final/", "")})` : ""}${g.preseason ? " · preseason" : ""}`;
+        const tenders = formGoalies(team, g);
+        const title = `${when ? `${when} · ` : ""}${vs} · ${RESULT_WORD[res] || res} ${g.gf}–${g.ga}${g.detail && /OT|SO/.test(g.detail) ? ` (${g.detail.replace("Final/", "")})` : ""}${g.preseason ? " · preseason" : ""}${tenders.length ? ` · ${tenders.join(", ")}` : ""}`;
         const cells = Array.from({ length: maxPeriods }, (_, i) => (g.periods[i] ? formCell(g.periods[i]) : `<span class="f5-cell none"></span>`)).join("");
+        const goalie = tenders.length ? `<small class="f5-goalie">${esc(tenders.join(" · "))}</small>` : "";
         return `
-          <span class="f5-opp" title="${esc(title)}"><em>${esc(vs)}</em>${g.preseason ? `<i class="f5-pre">pre</i>` : ""}</span>
+          <span class="f5-opp" title="${esc(title)}"><span class="f5-opp-line"><em>${esc(vs)}</em>${g.preseason ? `<i class="f5-pre">pre</i>` : ""}</span>${goalie}</span>
           <span class="f5-res ${cls}" title="${esc(title)}"><b>${esc(res)}</b><small>${g.gf}–${g.ga}</small></span>
           ${cells}`;
       })
       .join("");
     return `
-      <div class="f5-team" style="--team:${color}; grid-template-columns: 3.9rem 2.1rem repeat(${maxPeriods}, minmax(0, 1fr))">
+      <div class="f5-team" style="--team:${color}; grid-template-columns: 5.4rem 2.1rem repeat(${maxPeriods}, minmax(0, 1fr))">
         <span class="f5-name">${esc(team.abbr)}</span><span class="f5-h"></span>${head}
+        ${chart}
         ${rows}
       </div>`;
   }
@@ -1193,7 +1216,7 @@
       <section class="last5" data-form-for="${esc(game.id)}" aria-label="Last ${limit} games for each team">
         <header class="f5-head">
           <span class="f5-label">Last ${limit}</span>
-          <span class="f5-key">oldest → newest · goals <small>shots on goal</small></span>
+          <span class="f5-key">oldest → newest · goals <small>shots</small> · goalie <small>depth</small></span>
         </header>
         ${formTeamHtml(game.away, form?.away, limit)}
         ${formTeamHtml(game.home, form?.home, limit)}
