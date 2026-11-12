@@ -185,12 +185,12 @@ def _unit_index(units: list[list[int]], on_ice: set[int]) -> int | None:
     return best
 
 
-def together_seconds(table: dict[int, list[tuple[int, int, int]]], players: list[int]) -> int:
-    """Seconds every player in ``players`` is on the ice at once, any strength."""
+def together_by_period(table: dict[int, list[tuple[int, int, int]]], players: list[int]) -> dict[int, int]:
+    """Seconds every player in ``players`` is on the ice at once, by period."""
     if not players:
-        return 0
+        return {}
     need = len(set(players))
-    total = 0
+    totals: dict[int, int] = {}
     periods = {period for pid in players for period, _start, _end in table.get(pid, [])}
     for period in periods:
         events: list[tuple[int, int, int]] = []
@@ -204,6 +204,7 @@ def together_seconds(table: dict[int, list[tuple[int, int, int]]], players: list
         open_count: dict[int, int] = {}
         previous: int | None = None
         together = False
+        total = 0
         for moment, delta, pid in events:
             if previous is not None and together and moment > previous:
                 total += moment - previous
@@ -212,7 +213,28 @@ def together_seconds(table: dict[int, list[tuple[int, int, int]]], players: list
                 open_count.pop(pid, None)
             together = len(open_count) >= need
             previous = moment
-    return total
+        if total:
+            totals[period] = total
+    return totals
+
+
+def together_seconds(table: dict[int, list[tuple[int, int, int]]], players: list[int]) -> int:
+    """Seconds every player in ``players`` is on the ice at once, any strength."""
+    return sum(together_by_period(table, players).values())
+
+
+def _period_label(period: int, *, playoffs: bool) -> str:
+    if period == 1:
+        return "1st"
+    if period == 2:
+        return "2nd"
+    if period == 3:
+        return "3rd"
+    if period == 4:
+        return "OT"
+    if not playoffs:
+        return "SO"
+    return f"{period - 3}OT"
 
 
 def _name_tokens(name: str) -> list[str]:
@@ -317,8 +339,22 @@ def live_lines(
     def show(unit: list[int]) -> list[str]:
         return [_last_display(names.get(pid, "")) or str(pid) for pid in unit]
 
+    periods = list(range(1, latest[0] + 1)) if latest[0] else []
+
+    def unit_row(label: str, unit: list[int], on: bool) -> dict[str, Any]:
+        by_period = together_by_period(table, unit)
+        split = [by_period.get(period, 0) for period in periods]
+        return {
+            "label": label,
+            "players": show(unit),
+            "seconds": sum(split),
+            "by_period": split,
+            "on": on,
+        }
+
     out: dict[str, Any] = {
         "through": _through_label(latest[0], latest[1], playoffs=playoffs) if latest[0] else "",
+        "periods": [{"n": period, "label": _period_label(period, playoffs=playoffs)} for period in periods],
         "home": {},
         "away": {},
     }
@@ -336,14 +372,8 @@ def live_lines(
         if pair_at is not None and sum(1 for pid in pairs[pair_at] if pid in matched) < 2:
             pair_at = None
         out[side] = {
-            "lines": [
-                {"label": f"L{index + 1}", "players": show(unit), "seconds": together_seconds(table, unit), "on": index == line_at}
-                for index, unit in enumerate(lines)
-            ],
-            "pairs": [
-                {"label": f"D{index + 1}", "players": show(unit), "seconds": together_seconds(table, unit), "on": index == pair_at}
-                for index, unit in enumerate(pairs)
-            ],
+            "lines": [unit_row(f"L{index + 1}", unit, index == line_at) for index, unit in enumerate(lines)],
+            "pairs": [unit_row(f"D{index + 1}", unit, index == pair_at) for index, unit in enumerate(pairs)],
             "on_forwards": [_last_display(str(row.get("name") or "")) for row in forwards_out if _last_display(str(row.get("name") or ""))],
             "on_defence": [_last_display(str(row.get("name") or "")) for row in defence_out if _last_display(str(row.get("name") or ""))],
         }

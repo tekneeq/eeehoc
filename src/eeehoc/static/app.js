@@ -1406,17 +1406,32 @@
     return `<span class="ice-unit" title="${esc(title)}"><em>${esc(label)}</em> ${esc(who)}</span>`;
   }
 
-  function iceChips(team, row) {
+  function iceCell(seconds, on) {
+    return `<span class="${on ? "on" : ""}">${seconds ? mmss(seconds) : "–"}</span>`;
+  }
+
+  function iceTable(team, row, periods) {
     const tagged = [
       ...(row.lines || []).map((unit) => ({ unit, out: unitOut(unit, row.on_forwards || []) })),
       ...(row.pairs || []).map((unit) => ({ unit, out: unitOut(unit, row.on_defence || []) })),
     ];
-    return tagged
+    if (!tagged.length || !periods.length) return "";
+    const showTotal = periods.length > 1;
+    const cols = periods.length + (showTotal ? 1 : 0);
+    const heads = periods.map((period) => `<span class="ice-h">${esc(period.label)}</span>`).join("") + (showTotal ? `<span class="ice-h">T</span>` : "");
+    const body = tagged
       .map(({ unit, out }) => {
-        const title = `${team.abbr} ${unit.label} ${unit.players.join(", ")}: ${mmss(unit.seconds)} on together tonight`;
-        return `<i class="${out ? "on" : ""}" title="${esc(title)}">${esc(unit.label)} ${mmss(unit.seconds)}</i>`;
+        const split = unit.by_period || [];
+        const bits = periods
+          .map((period, index) => `${period.label} ${mmss(split[index] || 0)}`)
+          .concat(showTotal ? [`total ${mmss(unit.seconds)}`] : []);
+        const title = `${team.abbr} ${unit.label} ${unit.players.join(", ")}: ${bits.join(", ")} on together`;
+        const cells = periods.map((_, index) => iceCell(split[index] || 0, out)).join("");
+        const total = showTotal ? iceCell(unit.seconds, out) : "";
+        return `<span class="ice-lab ${out ? "on" : ""}" title="${esc(title)}">${esc(unit.label)}</span>${cells}${total}`;
       })
       .join("");
+    return `<div class="ice-grid" style="grid-template-columns: 1.7rem repeat(${cols}, 2.5rem)"><span></span>${heads}${body}</div>`;
   }
 
   function iceHtml(game) {
@@ -1427,17 +1442,17 @@
       const row = ice[key];
       if (!row) return "";
       const now = [iceNow(row, "lines"), iceNow(row, "pairs")].filter(Boolean).join("");
-      const chips = iceChips(team, row);
-      if (!now && !chips) return "";
+      const table = iceTable(team, row, ice.periods || []);
+      if (!now && !table) return "";
       return `<div class="ice-team" style="--team:${teamColor(team)}">
           <span class="ice-now"><b>${esc(team.abbr)}</b>${now || `<span class="ice-quiet">charting lines…</span>`}</span>
-          ${chips ? `<span class="ice-toi">${chips}</span>` : ""}
+          ${table}
         </div>`;
     };
     const body = side("away") + side("home");
     if (!body) return "";
     const through = ice.through ? `ice time through ${ice.through}` : "shift chart not in yet";
-    const title = `Who is on the ice now, from ESPN. L1–L4 and D1–D3 are the groups sharing the ice tonight, numbered by how much they have played, so the numbers settle as the game goes on. Each time is how long that group has been out together, from the NHL shift chart, which runs a few minutes behind the clock${ice.through ? ` — ${through}` : ""}.`;
+    const title = `Who is on the ice now, from ESPN. L1–L4 and D1–D3 are the groups sharing the ice tonight, numbered by how much they have played, so the numbers settle as the game goes on. Each column is how long that group was out together in that period, and T is the game so far. Times come from the NHL shift chart, which runs a few minutes behind the clock${ice.through ? ` — ${through}` : ""}.`;
     return `
       <section class="ice-lines" aria-label="Lines on the ice" title="${esc(title)}">
         <div class="spg-head">
