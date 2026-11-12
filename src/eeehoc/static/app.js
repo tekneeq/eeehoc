@@ -1383,6 +1383,71 @@
         ${pathsModelHtml(game, data)}`);
   }
 
+  // A line counts as the one out only when all of its skaters are actually on the ice.
+  function unitOut(unit, names) {
+    return !!(unit && unit.on && unit.players.length && unit.players.every((name) => names.includes(name)));
+  }
+
+  function iceNow(row, kind) {
+    const names = (kind === "lines" ? row.on_forwards : row.on_defence) || [];
+    const units = (row && row[kind]) || [];
+    const on = units.find((unit) => unitOut(unit, names));
+    const shown = on ? on.players : names;
+    if (!shown.length) return "";
+    const extra = on ? names.filter((name) => !on.players.includes(name)) : [];
+    const label = on ? on.label : "mix";
+    const who = shown.join(" · ") + (extra.length ? ` + ${extra.join(" · ")}` : "");
+    const closest = units.find((unit) => unit.on);
+    const title = on
+      ? `${on.label} ${on.players.join(", ")} is out${extra.length ? `, with ${extra.join(", ")}` : ""}. ${mmss(on.seconds)} together so far`
+      : closest
+        ? `Out now: ${shown.join(", ")}. Closest is ${closest.label} (${closest.players.join(", ")}), which is not all out`
+        : `Out now: ${shown.join(", ")}`;
+    return `<span class="ice-unit" title="${esc(title)}"><em>${esc(label)}</em> ${esc(who)}</span>`;
+  }
+
+  function iceChips(team, row) {
+    const tagged = [
+      ...(row.lines || []).map((unit) => ({ unit, out: unitOut(unit, row.on_forwards || []) })),
+      ...(row.pairs || []).map((unit) => ({ unit, out: unitOut(unit, row.on_defence || []) })),
+    ];
+    return tagged
+      .map(({ unit, out }) => {
+        const title = `${team.abbr} ${unit.label} ${unit.players.join(", ")}: ${mmss(unit.seconds)} on together tonight`;
+        return `<i class="${out ? "on" : ""}" title="${esc(title)}">${esc(unit.label)} ${mmss(unit.seconds)}</i>`;
+      })
+      .join("");
+  }
+
+  function iceHtml(game) {
+    const ice = game.ice;
+    if (game.state !== "in" || !ice) return "";
+    const side = (key) => {
+      const team = game[key];
+      const row = ice[key];
+      if (!row) return "";
+      const now = [iceNow(row, "lines"), iceNow(row, "pairs")].filter(Boolean).join("");
+      const chips = iceChips(team, row);
+      if (!now && !chips) return "";
+      return `<div class="ice-team" style="--team:${teamColor(team)}">
+          <span class="ice-now"><b>${esc(team.abbr)}</b>${now || `<span class="ice-quiet">charting lines…</span>`}</span>
+          ${chips ? `<span class="ice-toi">${chips}</span>` : ""}
+        </div>`;
+    };
+    const body = side("away") + side("home");
+    if (!body) return "";
+    const through = ice.through ? `ice time through ${ice.through}` : "shift chart not in yet";
+    const title = `Who is on the ice now, from ESPN. L1–L4 and D1–D3 are the groups sharing the ice tonight, numbered by how much they have played, so the numbers settle as the game goes on. Each time is how long that group has been out together, from the NHL shift chart, which runs a few minutes behind the clock${ice.through ? ` — ${through}` : ""}.`;
+    return `
+      <section class="ice-lines" aria-label="Lines on the ice" title="${esc(title)}">
+        <div class="spg-head">
+          <span class="spg-label">On the ice</span>
+          <span class="spg-key">${esc(through)}</span>
+        </div>
+        ${body}
+      </section>`;
+  }
+
   function chicletHtml(game) {
     const expanded = state.expanded.has(game.id);
     const s = game.situation;
@@ -1457,6 +1522,7 @@
                </div>`
             : ""
         }
+        ${iceHtml(game)}
         ${
           lp && lp.text
             ? `<div class="last-play ${lp.score_value ? "scoring" : ""}">

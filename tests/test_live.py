@@ -978,6 +978,42 @@ def test_roster_goalie_without_a_stats_page_sorts_as_zero_starts():
     assert home["goalies"][1]["starts"] == 0
 
 
+def test_on_ice_players_skip_the_bench_and_the_goalie():
+    from eeehoc.live import _on_ice_players
+
+    summary = {
+        "boxscore": {
+            "players": [
+                {
+                    "team": {"id": "1"},
+                    "statistics": [
+                        {
+                            "athletes": [
+                                {"athlete": {"id": "10", "shortName": "B. Point", "position": {"abbreviation": "C"}}},
+                                {"athlete": {"id": "11", "shortName": "A. Vasilevskiy", "position": {"abbreviation": "G"}}},
+                            ]
+                        }
+                    ],
+                }
+            ]
+        },
+        "onIce": [
+            {
+                "teamId": "1",
+                "entries": [
+                    {"athleteid": "10", "whereabouts": {"id": "1", "description": "In Play"}},
+                    {"athleteid": "11", "whereabouts": {"id": "1", "description": "In Play"}},
+                    {"athleteid": "12", "whereabouts": {"id": "2", "description": "On Bench"}},
+                ],
+            }
+        ],
+    }
+    assert _on_ice_players(summary, "1", "2") == {
+        "home": [{"name": "B. Point", "position": "C"}],
+        "away": [],
+    }
+
+
 def test_goal_tags_follow_the_strength_on_the_play():
     from eeehoc.live import _goal_tag
 

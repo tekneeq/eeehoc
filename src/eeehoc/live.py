@@ -402,6 +402,41 @@ def _strength_label(home_n: int | None, away_n: int | None) -> tuple[str, str | 
     return f"{hi}-on-{lo}", power_play
 
 
+def _on_ice_players(summary: dict[str, Any], home_id: str, away_id: str) -> dict[str, list[dict[str, str]]]:
+    """Skaters ESPN currently has in play, with the short name and position from the box score."""
+    known: dict[str, dict[str, str]] = {}
+    for group in (summary.get("boxscore") or {}).get("players") or []:
+        side = _team_side((group.get("team") or {}).get("id"), home_id, away_id)
+        if side is None:
+            continue
+        for block in group.get("statistics") or []:
+            for row in block.get("athletes") or []:
+                person = row.get("athlete") or {}
+                pid = str(person.get("id") or "")
+                position = person.get("position") or {}
+                abbr = position.get("abbreviation") if isinstance(position, dict) else ""
+                if pid and pid not in known:
+                    known[pid] = {
+                        "name": str(person.get("shortName") or person.get("displayName") or ""),
+                        "position": str(abbr or ""),
+                        "side": side,
+                    }
+    out: dict[str, list[dict[str, str]]] = {"home": [], "away": []}
+    for side in summary.get("onIce") or []:
+        which = _team_side(side.get("teamId"), home_id, away_id)
+        if which is None:
+            continue
+        for entry in side.get("entries") or []:
+            where = entry.get("whereabouts") or {}
+            if str(where.get("description") or "") != "In Play" and str(where.get("id") or "") != "1":
+                continue
+            info = known.get(str(entry.get("athleteid") or ""))
+            if info is None or info["position"].upper() == "G":
+                continue
+            out[which].append({"name": info["name"], "position": info["position"]})
+    return out
+
+
 def situation_from_summary(summary: dict[str, Any], home_id: str, away_id: str) -> dict[str, Any]:
     last = None
     for play in reversed(summary.get("plays") or []):
@@ -950,6 +985,7 @@ def apply_summary(game: dict[str, Any], summary: dict[str, Any]) -> None:
 
     if game["state"] == "in":
         game["situation"] = situation_from_summary(summary, home_id, away_id)
+        game["on_ice"] = _on_ice_players(summary, home_id, away_id)
     else:
         game["situation"] = None
 
@@ -1212,7 +1248,37 @@ class LiveFeed:
             self._annotate_goalies(board, now)
         except Exception:  # noqa: BLE001 - rank is extra; the scoreboard still has to render
             pass
+        try:
+            self._annotate_ice(board, now)
+        except Exception:  # noqa: BLE001 - lines are extra; the scoreboard still has to render
+            pass
         return board
+
+    def _ice_source(self) -> Any:
+        source = getattr(self, "_ice_source_obj", None)
+        if source is None:
+            from eeehoc.lines import LineSource
+
+            source = LineSource(self._fetch)
+            self._ice_source_obj = source
+        return source
+
+    def _annotate_ice(self, board: dict[str, Any], now: float) -> None:
+        """Who is on the ice, and how long each line has been out, for games in progress."""
+        games = [game for game in board.get("games") or [] if game.get("state") == "in"]
+        if not games:
+            return
+        source = self._ice_source()
+        day = str(board.get("day") or "")
+        for game in games:
+            game["ice"] = source.for_live(
+                day,
+                str(game["away"].get("abbr") or ""),
+                str(game["home"].get("abbr") or ""),
+                game.get("on_ice") or {},
+                playoffs=bool(game.get("playoffs")),
+                now=now,
+            )
 
     def get(self, *, force: bool = False, dates: str | None = None) -> dict[str, Any]:
         if dates is not None and not DATE_RE.fullmatch(dates):

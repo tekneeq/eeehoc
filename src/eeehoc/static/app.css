@@ -644,6 +644,64 @@ body.chiclet-dragging {
   letter-spacing: 0.08em;
 }
 
+.ice-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ice-team {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.32rem 0.5rem;
+  border-left: 2px solid var(--team);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--team) 10%, transparent);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.ice-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.55rem;
+}
+
+.ice-now b {
+  color: var(--team);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ice-unit em {
+  font-style: normal;
+  font-weight: 700;
+  margin-right: 0.2rem;
+}
+
+.ice-quiet {
+  color: var(--muted);
+}
+
+.ice-toi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.55rem;
+  color: var(--muted);
+}
+
+.ice-toi i {
+  font-style: normal;
+}
+
+.ice-toi i.on {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .last-play {
   display: flex;
   flex-direction: column;
