@@ -215,19 +215,117 @@
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   }
 
-  function teamColor(team) {
-    const primary = hexOf(team.color) || "555555";
-    const alt = hexOf(team.alt_color);
+  function ensureReadable(hex) {
+    if (luminance(hex) >= 0.22) return hex;
+    const lift = (n) => Math.min(255, n + 96);
+    return [0, 2, 4].map((i) => lift(parseInt(hex.slice(i, i + 2), 16)).toString(16).padStart(2, "0")).join("");
+  }
+
+  function baseTeamColor(team) {
+    const primary = hexOf(team && team.color) || "555555";
+    const alt = hexOf(team && team.alt_color);
     let hex = primary;
     if (luminance(primary) < 0.22 && alt && luminance(alt) > luminance(primary)) hex = alt;
-    if (luminance(hex) < 0.22) {
-      const lift = (n) => Math.min(255, n + 96);
-      const r = lift(parseInt(hex.slice(0, 2), 16));
-      const g = lift(parseInt(hex.slice(2, 4), 16));
-      const b = lift(parseInt(hex.slice(4, 6), 16));
-      hex = [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+    return `#${ensureReadable(hex)}`;
+  }
+
+  function hslOf(hex) {
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (!d) return { h: 0, s: 0, l };
+    const s = d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+    return { h, s, l };
+  }
+
+  function hexFromHsl(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = (((h % 360) + 360) % 360) / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    const m = l - c / 2;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hp < 1) [r, g, b] = [c, x, 0];
+    else if (hp < 2) [r, g, b] = [x, c, 0];
+    else if (hp < 3) [r, g, b] = [0, c, x];
+    else if (hp < 4) [r, g, b] = [0, x, c];
+    else if (hp < 5) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    const to = (n) => Math.round(Math.min(255, Math.max(0, (n + m) * 255))).toString(16).padStart(2, "0");
+    return `${to(r)}${to(g)}${to(b)}`;
+  }
+
+  function hueGap(a, b) {
+    const d = Math.abs(a - b) % 360;
+    return Math.min(d, 360 - d);
+  }
+
+  // Two reds, or two navies, read as one club. Grey against a saturated color still separates.
+  function colorsTooClose(a, b) {
+    const left = hslOf(a.slice(1));
+    const right = hslOf(b.slice(1));
+    if (left.s < 0.22 || right.s < 0.22) return Math.abs(left.l - right.l) < 0.14 && Math.abs(left.s - right.s) < 0.2;
+    return hueGap(left.h, right.h) < 32 && Math.abs(left.l - right.l) < 0.16;
+  }
+
+  function colorGap(a, b) {
+    const left = hslOf(a.slice(1));
+    const right = hslOf(b.slice(1));
+    const hue = left.s < 0.22 || right.s < 0.22 ? 0 : hueGap(left.h, right.h) / 180;
+    return hue + Math.abs(left.l - right.l) + Math.abs(left.s - right.s) * 0.35;
+  }
+
+  function vivid(hex) {
+    const { h, s, l } = hslOf(hex);
+    if (s < 0.12) return `#${ensureReadable(hex)}`;
+    return `#${hexFromHsl(h, Math.max(s, 0.55), l < 0.4 ? 0.56 : Math.min(0.7, l))}`;
+  }
+
+  function rotateColor(color, degrees) {
+    const { h, s, l } = hslOf(color.slice(1));
+    return `#${hexFromHsl(h + degrees, Math.max(s, 0.55), Math.min(0.62, Math.max(0.42, l)))}`;
+  }
+
+  // When both clubs paint the same, keep one primary and move the other to its alternate.
+  function assignSwatches(game) {
+    if (!game?.away || !game?.home) return;
+    let away = baseTeamColor(game.away);
+    let home = baseTeamColor(game.home);
+    if (colorsTooClose(away, home)) {
+      const options = [];
+      for (const [side, team, other] of [
+        ["away", game.away, home],
+        ["home", game.home, away],
+      ]) {
+        const alt = hexOf(team.alt_color);
+        if (!alt) continue;
+        const color = vivid(alt);
+        if (!colorsTooClose(color, other)) options.push({ side, color, gap: colorGap(color, other) });
+      }
+      options.sort((x, y) => y.gap - x.gap);
+      if (options.length) {
+        if (options[0].side === "away") away = options[0].color;
+        else home = options[0].color;
+      } else home = rotateColor(home, 150);
     }
-    return `#${hex}`;
+    game.away._swatch = away;
+    game.home._swatch = home;
+  }
+
+  function teamColor(team) {
+    if (team && team._swatch) return team._swatch;
+    return baseTeamColor(team);
   }
 
   // "J. Swayman" -> "Swayman". The box-score list is most ice time first, so the
@@ -1487,6 +1585,7 @@
   }
 
   function chicletHtml(game) {
+    assignSwatches(game);
     const expanded = state.expanded.has(game.id);
     const s = game.situation;
     const lp = s?.last_play;
