@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from eeehoc.lines import NHL_PBP_URL, NHL_SCHEDULE_URL, NHL_SHIFTS_URL, LineSource, game_lines, live_lines, nhl_abbr, together_seconds
+from eeehoc.lines import (
+    NHL_PBP_URL,
+    NHL_SCHEDULE_URL,
+    NHL_SHIFTS_URL,
+    LineSource,
+    game_lines,
+    live_lines,
+    merge_shift_charts,
+    nhl_abbr,
+    shifts_from_toi_report,
+    together_seconds,
+    toi_report_urls,
+)
 
 AWAY, HOME = 10, 20
 # Away forwards 101-106 (two trios), defence 107-110 (two pairs), goalie 111.
@@ -12,7 +24,14 @@ H_L1, H_L2, H_D1, H_D2 = [201, 202, 203], [204, 205, 206], [207, 208], [209, 210
 
 
 def _spot(team, pid, pos):
-    return {"teamId": team, "playerId": pid, "positionCode": pos, "firstName": {"default": "P"}, "lastName": {"default": str(pid)}}
+    return {
+        "teamId": team,
+        "playerId": pid,
+        "sweaterNumber": pid,
+        "positionCode": pos,
+        "firstName": {"default": "P"},
+        "lastName": {"default": str(pid)},
+    }
 
 
 def _roster():
@@ -147,7 +166,10 @@ def test_line_source_refreshes_a_live_game_on_a_short_ttl():
             return _shifts()
         raise RuntimeError(f"offline {url}")
 
-    source = LineSource(fetch)
+    def fetch_text(url):
+        raise RuntimeError(f"no report {url}")
+
+    source = LineSource(fetch, fetch_text=fetch_text)
     on = {"away": [{"name": "P. 101", "position": "C"}, {"name": "P. 102", "position": "L"}, {"name": "P. 103", "position": "R"}], "home": []}
     first = source.for_live("2026-10-14", "LA", "TB", on, playoffs=False, now=1000.0)
     assert first["away"]["lines"][0]["on"] is True
@@ -155,6 +177,61 @@ def test_line_source_refreshes_a_live_game_on_a_short_ttl():
     assert len(calls) == 3
     source.for_live("2026-10-14", "LA", "TB", on, playoffs=False, now=1025.0)
     assert len(calls) == 5  # play-by-play and shifts again; the schedule is still fresh
+
+
+def _toi_html(rows, pids):
+    """A minimal time-on-ice report for the given player ids."""
+    parts = []
+    for pid in pids:
+        cells = []
+        owned = [row for row in rows if row["playerId"] == pid]
+        for number, row in enumerate(owned, 1):
+            cells.append(
+                f"<tr><td>{number}</td><td>{row['period']}</td>"
+                f"<td>{row['startTime']} / 0:00</td><td>{row['endTime']} / 0:00</td></tr>"
+            )
+        parts.append(f'<td class="playerHeading + border" colspan="8">{pid} {pid}, P</td>' + "".join(cells))
+    return "".join(parts)
+
+
+def test_live_lines_use_the_shift_report_when_it_is_ahead_of_the_json_chart():
+    """The JSON chart can sit on the end of a period while the HTML report has the next one."""
+    published = [row for row in _shifts()["data"] if row["period"] == 1]
+    ahead = [row for row in _shifts()["data"] if row["period"] <= 2]
+    away_ids = A_L1 + A_L2 + A_D1 + A_D2 + [111]
+    home_ids = H_L1 + H_L2 + H_D1 + H_D2 + [211]
+    reports = {
+        toi_report_urls(2026020999)[0]: _toi_html(ahead, away_ids),
+        toi_report_urls(2026020999)[1]: _toi_html(ahead, home_ids),
+    }
+
+    def fetch(url):
+        if url == NHL_SCHEDULE_URL.format(day="2026-10-14"):
+            return _schedule()
+        if url == NHL_PBP_URL.format(game_id=2026020999):
+            return _pbp([])
+        if url == f"{NHL_SHIFTS_URL.format(game_id=2026020999)}&limit=2000":
+            return {"data": published}
+        raise RuntimeError(f"offline {url}")
+
+    source = LineSource(fetch, fetch_text=lambda url: reports[url])
+    ice = source.for_live(
+        "2026-10-14",
+        "LA",
+        "TB",
+        {"away": [{"name": "P. 101", "position": "C"}], "home": []},
+        playoffs=False,
+        now=1000.0,
+    )
+    assert ice is not None
+    assert ice["through"] == "2nd 20:00"
+    assert [period["label"] for period in ice["periods"]] == ["1st", "2nd"]
+    assert ice["away"]["lines"][0]["by_period"] == [630, 630]
+
+    # A report that is no further along than the JSON chart leaves those shifts alone.
+    same = shifts_from_toi_report(_toi_html(published, away_ids), _roster(), AWAY)
+    merged = merge_shift_charts({"data": published}, same)
+    assert merged["data"] == published
 
 
 def test_nhl_abbreviations():
