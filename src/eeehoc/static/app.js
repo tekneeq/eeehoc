@@ -1236,7 +1236,10 @@
 
   function fmtFormDate(iso) {
     if (!iso) return "";
-    const d = new Date(iso);
+    const raw = String(iso);
+    // A date with no clock is a calendar day. Parsing it as UTC midnight would show the previous evening in New York.
+    const stamp = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T17:00:00Z` : raw;
+    const d = new Date(stamp);
     if (Number.isNaN(d.getTime())) return "";
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
   }
@@ -1293,8 +1296,9 @@
         const title = `${when ? `${when} · ` : ""}${vs} · ${RESULT_WORD[res] || res} ${g.gf}–${g.ga}${g.detail && /OT|SO/.test(g.detail) ? ` (${g.detail.replace("Final/", "")})` : ""}${g.preseason ? " · preseason" : ""}${tenders.length ? ` · ${tenders.join(", ")}` : ""}`;
         const cells = Array.from({ length: maxPeriods }, (_, i) => (g.periods[i] ? formCell(g.periods[i]) : `<span class="f5-cell none"></span>`)).join("");
         const goalie = tenders.length ? `<small class="f5-goalie">${esc(tenders.join(" · "))}</small>` : "";
+        const whenHtml = when ? `<small class="f5-when">${esc(when)}</small>` : "";
         return `
-          <span class="f5-opp" title="${esc(title)}"><span class="f5-opp-line"><em>${esc(vs)}</em>${g.preseason ? `<i class="f5-pre">pre</i>` : ""}</span>${goalie}</span>
+          <span class="f5-opp" title="${esc(title)}">${whenHtml}<span class="f5-opp-line"><em>${esc(vs)}</em>${g.preseason ? `<i class="f5-pre">pre</i>` : ""}</span>${goalie}</span>
           <span class="f5-res ${cls}" title="${esc(title)}"><b>${esc(res)}</b><small>${g.gf}–${g.ga}</small></span>
           ${cells}`;
       })

@@ -1526,6 +1526,7 @@ body.chiclet-dragging {
   color: var(--text);
 }
 
+.f5-when,
 .f5-goalie {
   max-width: 100%;
   overflow: hidden;
@@ -1533,6 +1534,12 @@ body.chiclet-dragging {
   white-space: nowrap;
   font-size: 0.52rem;
   color: var(--muted);
+}
+
+.f5-when {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .f5-chart {
