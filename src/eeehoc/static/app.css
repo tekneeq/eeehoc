@@ -1269,6 +1269,104 @@ body.chiclet-dragging {
   line-height: 1.2;
 }
 
+/* Grade: each team and its goalie against their own usual by this point of a game, away left and home right. */
+.grd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.grd-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.9rem minmax(0, 1fr);
+  gap: 0.18rem 0.3rem;
+  align-items: stretch;
+  font-family: var(--mono);
+}
+
+.grd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.grd-top b {
+  font-size: 0.95rem;
+}
+
+.grd-top b em {
+  font-style: normal;
+  margin-right: 0.3rem;
+}
+
+.grd-top small {
+  text-align: center;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.grd-read {
+  --s: 0%;
+  --tone: rgba(255, 255, 255, 0.05);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.12rem 0.32rem;
+  border-radius: 0.28rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(90deg, var(--tone) var(--s), rgba(255, 255, 255, 0.015) var(--s));
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.grd-read .v {
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grd-read .v small {
+  margin-left: 0.25rem;
+  font-size: 0.56rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.grd-read .s {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.grd-read.up {
+  --tone: rgba(125, 255, 179, 0.13);
+  border-color: rgba(125, 255, 179, 0.3);
+}
+
+.grd-read.up .s {
+  color: var(--accent);
+}
+
+.grd-read.down {
+  --tone: rgba(255, 200, 87, 0.12);
+  border-color: rgba(255, 200, 87, 0.32);
+}
+
+.grd-read.down .s {
+  color: var(--warn);
+}
+
+.grd-read.none {
+  border-style: dashed;
+  color: var(--muted);
+}
+
 /* Goals by line: each team's goals scored and allowed split by the forward line and defence pair on the ice. */
 .gbl {
   display: flex;

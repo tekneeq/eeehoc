@@ -575,6 +575,29 @@ def _penalties(
     return out
 
 
+def power_play_spans(
+    plays: list[dict[str, Any]],
+    home_id: str,
+    away_id: str,
+    *,
+    end: int,
+    live: bool,
+    playoffs: bool = False,
+    ot_seconds: int = 300,
+    goals: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The power plays in a play-by-play up to ``end`` seconds, from its penalties and goals."""
+    if goals is None:
+        goals = _goals(plays, home_id, away_id, ot_seconds, playoffs=playoffs)
+    return power_plays(
+        _penalties(plays, home_id, away_id, ot_seconds=ot_seconds, playoffs=playoffs),
+        [{"side": g["side"], "at": g["at"], "pp": g["tag"].startswith("PP") if g.get("strength") else None} for g in goals],
+        end=end,
+        live=live,
+        playoffs=playoffs,
+    )
+
+
 def _game_end_seconds(game: dict[str, Any], plays: list[dict[str, Any]]) -> int:
     """How far the clock has run: the scoreboard clock, or the play-by-play if it is ahead."""
     playoffs = bool(game.get("playoffs"))
@@ -1028,12 +1051,15 @@ def apply_summary(game: dict[str, Any], summary: dict[str, Any]) -> None:
             playoffs=bool(game.get("playoffs")),
         )
         game["xg"] = game_xg(plays, home_id, away_id, playoffs=bool(game.get("playoffs")))
-        game["power_plays"] = power_plays(
-            _penalties(plays, home_id, away_id, ot_seconds=_int(game.get("ot_seconds"), 300), playoffs=bool(game.get("playoffs"))),
-            [{"side": g["side"], "at": g["at"], "pp": g["tag"].startswith("PP") if g.get("strength") else None} for g in game["goals"]],
+        game["power_plays"] = power_play_spans(
+            plays,
+            home_id,
+            away_id,
             end=_game_end_seconds(game, plays),
             live=game["state"] == "in",
             playoffs=bool(game.get("playoffs")),
+            ot_seconds=_int(game.get("ot_seconds"), 300),
+            goals=game["goals"],
         )
     else:
         game["period_shots"] = []
@@ -1090,6 +1116,11 @@ class LiveFeed:
             return cached[1] if cached else None
         self._summaries[gid] = (now, summary, game["state"])
         return summary
+
+    def cached_summary(self, game_id: str) -> dict[str, Any] | None:
+        """The box score and play-by-play last fetched for a game on a board."""
+        cached = self._summaries.get(str(game_id))
+        return cached[1] if cached else None
 
     def _load_cached(self, jobs: list[tuple[str, float, str]], now: float) -> dict[str, Any]:
         found: dict[str, Any] = {}

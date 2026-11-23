@@ -116,7 +116,10 @@ def power_plays(
     live: bool,
     playoffs: bool = False,
 ) -> dict[str, Any]:
-    """Advantage spans up to ``end`` seconds, plus a count, time and goals per side."""
+    """Advantage spans up to ``end`` seconds, plus a count, time and goals per side.
+
+    ``starts`` is when each side's opportunities began, one entry per opportunity counted.
+    """
     units = _units(penalties)
     _cancel_coincidentals(units)
     units = [u for u in units if not u.cancelled and u.at <= end]
@@ -231,9 +234,11 @@ def power_plays(
             )
 
     totals = {s: {"count": 0, "seconds": 0, "goals": 0, "spans": 0} for s in ("home", "away")}
+    starts: dict[str, list[int]] = {"home": [], "away": []}
     for unit in units:
         if unit.opportunity:
             totals[_other(unit.side)]["count"] += 1
+            starts[_other(unit.side)].append(int(unit.start or unit.at))
     for span in spans:
         units_in = span.pop("_units")
         span["strength"] = max((seg["strength"] for seg in span["segments"]), key=lambda s: int(s.split("-")[0]) - int(s.split("-")[-1]))
@@ -253,4 +258,9 @@ def power_plays(
         totals[side]["spans"] += 1
         totals[side]["seconds"] += span["end"] - span["start"]
         totals[side]["goals"] += span["goals"]
-    return {"spans": spans, "home": totals["home"], "away": totals["away"]}
+    return {
+        "spans": spans,
+        "home": totals["home"],
+        "away": totals["away"],
+        "starts": {side: sorted(times) for side, times in starts.items()},
+    }
