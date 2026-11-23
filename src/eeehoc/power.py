@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from typing import Any
 
+from eeehoc.grade import game_sides
 from eeehoc.lines import LINE_COUNT, LINES_NOTE, PAIR_COUNT, LineSource
 from eeehoc.live import PLAYOFF_TYPE, SCOREBOARD_URL, SUMMARY_URL, FetchJson, _int, fetch_json, period_shot_lines
 from eeehoc.periods import ET, PRESEASON_TYPE, REGULAR_TYPE, _game_day, _months, _season_meta
@@ -126,6 +127,15 @@ def game_record(summary: dict[str, Any], *, event_id: str = "") -> dict[str, Any
         "home": sides["home"],
         "away": sides["away"],
         "lines": None,
+        # Both sides at the second, for the live grade.
+        "timeline": game_sides(
+            summary,
+            home_id,
+            away_id,
+            playoffs=playoffs,
+            event_id=str(header.get("id") or comp.get("id") or event_id),
+            start=iso,
+        ),
     }
 
 
@@ -506,6 +516,7 @@ class PowerFeed:
         self._records: dict[str, dict[str, Any]] = {}
         self._misses: dict[str, float] = {}
         self._result: tuple[float, date, dict[str, Any]] | None = None
+        self._season: list[dict[str, Any]] = []
         self._last_error: str | None = None
         self._worker: threading.Thread | None = None
 
@@ -594,7 +605,14 @@ class PowerFeed:
         result["missing"] = len(wanted) - len(records)
         with self._lock:
             self._result = (now, today, result)
+            self._season = records
         return result
+
+    def records(self, *, today: date | None = None) -> list[dict[str, Any]]:
+        """Every final behind the latest table. Empty until the first build lands."""
+        self.get(today=today)
+        with self._lock:
+            return list(self._season)
 
     def _refresh_in_background(self, today: date) -> None:
         with self._lock:

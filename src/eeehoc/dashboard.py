@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from eeehoc.form import FormFeed
+from eeehoc.grade import GradeBoard
 from eeehoc.live import DATE_RE, LiveFeed
 from eeehoc.periods import PeriodFeed
 from eeehoc.power import PowerFeed
@@ -33,6 +34,7 @@ class DashboardState:
         shots: ShotsFeed | None = None,
         power: PowerFeed | None = None,
         paths: PathsFeed | None = None,
+        grade: GradeBoard | None = None,
     ) -> None:
         self.live = live or LiveFeed()
         self.periods = periods or PeriodFeed()
@@ -41,6 +43,7 @@ class DashboardState:
         self.shots = shots or ShotsFeed()
         self.power = power or PowerFeed()
         self.paths = paths or PathsFeed()
+        self.grade = grade or GradeBoard(self.live, self.power)
 
 
 def _json_bytes(payload: Any) -> bytes:
@@ -135,6 +138,18 @@ def make_handler(state: DashboardState):
                     board = state.power.get(wait=wait)
                 except Exception as exc:  # noqa: BLE001
                     return self._send(502, _json_bytes({"error": str(exc), "teams": {}}), "application/json")
+                return self._send(200, _json_bytes(board), "application/json")
+
+            if path == "/api/grade":
+                dates = (qs.get("dates") or [""])[0].strip() or None
+                if dates is not None and not DATE_RE.fullmatch(dates):
+                    return self._send(
+                        400, _json_bytes({"error": "dates must be YYYYMMDD", "games": {}}), "application/json"
+                    )
+                try:
+                    board = state.grade.get(dates=dates)
+                except Exception as exc:  # noqa: BLE001
+                    return self._send(502, _json_bytes({"error": str(exc), "games": {}}), "application/json")
                 return self._send(200, _json_bytes(board), "application/json")
 
             if path == "/api/paths":
