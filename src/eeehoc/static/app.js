@@ -9,6 +9,8 @@
     pathsAnyWay: new Set(),
     shots: null,
     power: null,
+    grades: null,
+    gradeTimer: null,
     tab: "live",
     wp: { board: null, season: null, day: null, loading: false, error: null },
     filter: "all",
@@ -153,6 +155,7 @@
       state.error = board.error || null;
       if (!state.dates && board.day) state.anchor = board.day;
       if (dayChanged) loadOrder();
+      await loadGrades(false);
     } catch (err) {
       state.error = err.message || String(err);
     } finally {
@@ -928,6 +931,172 @@
       </section>`;
   }
 
+  // ------------------------------------------------------------- Grade
+
+  // How each side and its goalie are playing against their own usual by this point of a game.
+  async function loadGrades(render = true) {
+    const dates = state.dates;
+    try {
+      const res = await fetch(`/api/grade${dates ? `?dates=${dates}` : ""}`);
+      const board = await res.json();
+      if (!res.ok) throw new Error(board.error || `HTTP ${res.status}`);
+      if (dates !== state.dates) return;
+      state.grades = board;
+      // The season's games take a few seconds to read the first time; ask again shortly.
+      if (board.loading) {
+        clearTimeout(state.gradeTimer);
+        state.gradeTimer = setTimeout(loadGrades, 4000);
+      } else if (render && state.board) renderLive();
+    } catch (err) {
+      console.warn("grades unavailable", err);
+    }
+  }
+
+  const GRADE_UP = 60;
+  const GRADE_DOWN = 40;
+
+  function gradeTone(score) {
+    return score >= GRADE_UP ? "up" : score <= GRADE_DOWN ? "down" : "";
+  }
+
+  // What each read counts, for the label's tooltip and each cell's.
+  const GRADE_READS = {
+    goals: { noun: "goals", help: "Goals scored against what this club usually has by this point." },
+    sog: { noun: "shots on goal", help: "Shots on goal against what this club usually has by this point." },
+    shots: {
+      noun: "shot attempts",
+      help: "Every shot attempt — on goal, missed and blocked — against what this club usually has by this point.",
+    },
+    xg: { noun: "expected goals", help: "Expected goals from where its unblocked shots came from, against its usual by this point." },
+    pp: { noun: "power plays", help: "Power plays drawn against what this club usually has by this point." },
+    pp_sog: {
+      noun: "power-play shots on goal",
+      help: "Shots on goal on the power play, against what this club usually gets from this much power-play time.",
+    },
+    pp_goals: {
+      noun: "power-play goals",
+      help: "Power-play goals, against what this club usually scores in this much power-play time.",
+    },
+    sog_against: { noun: "shots on goal allowed", help: "Shots on goal allowed against its usual by this point. Fewer scores higher." },
+    xg_against: { noun: "expected goals allowed", help: "Expected goals allowed against its usual by this point. Fewer scores higher." },
+    short: { noun: "times shorthanded", help: "Times shorthanded against its usual by this point. Fewer scores higher." },
+    faceoffs: { noun: "% of faceoffs won", help: "Share of faceoffs won against this club's usual share." },
+  };
+
+  function gradeTopCell(tone, title, letter, score, sub) {
+    return `<span class="spg-cell grd-top ${tone}" title="${esc(title)}"><b><em>${esc(letter)}</em>${esc(String(score))}</b><small>${esc(sub)}</small></span>`;
+  }
+
+  function gradeTeamCell(team, side, when) {
+    const g = side?.team;
+    if (!g) return `<span class="spg-cell none"><b>–</b><small>no read yet</small></span>`;
+    const basis = g.games ? `its last ${plural(g.games, "game")}` : "the league average";
+    const title = `${team.abbr}: ${g.letter} · ${g.score} of 100 against ${basis} ${when}. 50 is exactly its usual; ${GRADE_UP}+ is a good night, ${GRADE_DOWN} or less a poor one.`;
+    return gradeTopCell(gradeTone(g.score), title, g.letter, g.score, g.games ? `vs its last ${g.games}` : "vs league avg");
+  }
+
+  function gradeGoalieCells(team, side) {
+    const goalies = side?.goalies || [];
+    if (!goalies.length) return `<span class="spg-cell none"><b>–</b><small>no shots yet</small></span>`;
+    return goalies
+      .map((g) => {
+        const worth = g.xg ? `worth ${fmtNum(g.xg)} xG` : "no shot locations";
+        const diff = g.saved_above;
+        const saved =
+          Math.abs(diff) < 0.05
+            ? "right at his usual"
+            : `${fmtNum(Math.abs(diff), 1)} ${diff > 0 ? "fewer" : "more"} than his usual`;
+        const pct = (v) => (v === null || v === undefined ? "–" : v.toFixed(3).replace(/^0/, ""));
+        const season = g.games
+          ? `${pct(g.usual_save_pct)} over his ${plural(g.games, "game")} this season`
+          : "no games this season yet, so read against the league";
+        const title = `${g.name}${g.in_net ? "" : " (pulled)"}: ${g.letter} · ${g.score} of 100. Allowed ${g.goals} on ${plural(g.shots, "shot")} ${worth}; at his usual he lets in ${fmtNum(g.expected, 1)} of those — ${saved}. ${pct(g.save_pct)} tonight, ${season}. Empty-net goals are not his.`;
+        const sub = `${g.name}${g.in_net ? "" : " (pulled)"} · ${g.goals} GA, usual ${fmtNum(g.expected, 1)} · ${g.saves} sv`;
+        return gradeTopCell(gradeTone(g.score), title, g.letter, g.score, sub);
+      })
+      .join("");
+  }
+
+  function gradeReadCell(team, side, key, when) {
+    const part = (side?.team?.parts || []).find((p) => p.key === key);
+    if (!part) return `<span class="grd-read none" title="${esc(`${team.abbr}: not enough to read yet`)}"><span class="v">–</span></span>`;
+    const noun = GRADE_READS[key]?.noun || part.label;
+    const isShare = key === "faceoffs";
+    const isRate = key === "pp_sog" || key === "pp_goals";
+    const digits = key === "xg" || key === "xg_against" ? 2 : isShare ? 0 : 1;
+    const actual = digits === 2 ? fmtNum(part.actual) : String(part.actual);
+    const usual = fmtNum(part.usual, digits);
+    const basis = part.games ? `over its last ${plural(part.games, "game")}` : "league average";
+    const versus = isRate
+      ? `its usual from ${mmss(side.team.pp_seconds || 0)} of power-play time is ${usual}`
+      : isShare
+        ? `its usual is ${usual}%`
+        : `its usual ${when} is ${usual}`;
+    const title = `${team.abbr}: ${actual}${isShare ? "" : " "}${noun}; ${versus} (${basis}) — ${part.score} of 100${part.lower ? ", fewer is better" : ""}`;
+    return `
+      <span class="grd-read ${gradeTone(part.score)}" style="--s:${part.score}%" title="${esc(title)}">
+        <span class="v">${esc(actual)}<small>/ ${esc(usual)}</small></span>
+        <span class="s">${part.score}</span>
+      </span>`;
+  }
+
+  function gradeHtml(game) {
+    if (game.state === "pre") return "";
+    const board = state.grades;
+    if (!board) return "";
+    const head = (key) => `
+        <div class="spg-head">
+          <span class="spg-label">Grade</span>
+          <span class="spg-key">${esc(key)}</span>
+        </div>`;
+    const grade = board.games?.[game.id];
+    if (!grade) {
+      const note = board.loading
+        ? "reading this season's games…"
+        : game.state === "in"
+          ? `starts after ${mmss(board.min_seconds || 300)} played`
+          : "";
+      return note ? `<section class="grd" aria-label="Live grade">${head(note)}</section>` : "";
+    }
+    const when = grade.final ? "over a full game" : `by ${mmss(grade.at)} played`;
+    const key = `tonight / own usual ${grade.final ? "full game" : `by ${mmss(grade.at)}`} · 50 = usual`;
+    const sides = { away: grade.away, home: grade.home };
+    const keys = Object.keys(board.weights || GRADE_READS).filter((k) =>
+      ["away", "home"].some((side) => (sides[side]?.team?.parts || []).some((p) => p.key === k)),
+    );
+    const label = (k) => {
+      const part = ["away", "home"].flatMap((side) => sides[side]?.team?.parts || []).find((p) => p.key === k);
+      return part?.label || k;
+    };
+    const rows = keys
+      .map(
+        (k) => `
+          ${gradeReadCell(game.away, sides.away, k, when)}
+          <span class="pwr-label" title="${esc(GRADE_READS[k]?.help || "")}">${esc(label(k))}</span>
+          ${gradeReadCell(game.home, sides.home, k, when)}`,
+      )
+      .join("");
+    const teamHelp = `Each club against its own usual ${when}: goals, shots, expected goals, the power play, what it allows and faceoffs, each scored 0–100 against what this club had by the same point of its past games and blended. 50 = its usual. A 75+, B 60+, C 40+, D 25+, F below.`;
+    const goalieHelp =
+      "The goalie's own number: the goals he has allowed against what the shots he faced were worth at his usual rate this season. 50 = his usual; higher is stopping more than he normally does.";
+    return `
+      <section class="grd" aria-label="Live grade: each team and goalie against its own usual">
+        ${head(key)}
+        <div class="grd-grid">
+          <span class="pwr-team" style="color:${teamColor(game.away)}">${esc(game.away.abbr)}</span>
+          <span></span>
+          <span class="pwr-team" style="color:${teamColor(game.home)}">${esc(game.home.abbr)}</span>
+          ${gradeTeamCell(game.away, sides.away, when)}
+          <span class="pwr-label" title="${esc(teamHelp)}">Team</span>
+          ${gradeTeamCell(game.home, sides.home, when)}
+          <span class="grd-stack">${gradeGoalieCells(game.away, sides.away)}</span>
+          <span class="pwr-label" title="${esc(goalieHelp)}">Goalie</span>
+          <span class="grd-stack">${gradeGoalieCells(game.home, sides.home)}</span>
+          ${rows}
+        </div>
+      </section>`;
+  }
+
   // ------------------------------------------------------------- Power
 
   async function loadPower() {
@@ -1675,6 +1844,7 @@
         ${goalTimeline(game)}
         ${linescore(game)}
         ${periodShots(game)}
+        ${gradeHtml(game)}
         ${pathsHtml(game)}
         ${core || more ? `<div class="stat-compare">${core}${more}</div>` : ""}
         ${shotsPerGoalHtml(game)}
