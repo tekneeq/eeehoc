@@ -17,17 +17,24 @@ of it.
 
 from __future__ import annotations
 
+import re
 import threading
+import urllib.error
+import urllib.request
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Callable
 
-from eeehoc.live import FetchJson, _int, fetch_json
+from eeehoc.live import USER_AGENT, FetchJson, _int, fetch_json
 from eeehoc.periods import ET
 
 NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/schedule/{day}"
 NHL_PBP_URL = "https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play"
 NHL_SHIFTS_URL = "https://api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId={game_id}"
+# The stats shift chart sits on the previous period for a long stretch. These reports
+# are the ones the NHL game sheet updates while the period is being played.
+NHL_TOI_URL = "https://www.nhl.com/scores/htmlreports/{season}/T{side}{number}.HTM"
 
 # ESPN abbreviations that differ from the NHL's.
 NHL_ABBR = {"LA": "LAK", "NJ": "NJD", "SJ": "SJS", "TB": "TBL"}
@@ -44,8 +51,17 @@ MISS_TTL = 10 * 60.0
 OLD_MISS_TTL = 6 * 60 * 60.0
 OLD_AFTER_DAYS = 2
 SCHEDULE_TTL = 6 * 60 * 60.0
-# The shift chart trails the clock, so a live game is re-read about as often as the scoreboard.
+# The shift reports trail the clock by a little, so a live game is re-read about as often as the scoreboard.
 LIVE_CHART_TTL = 20.0
+FetchText = Callable[[str], str]
+
+_PLAYER_HEADING = re.compile(r'class="playerHeading[^"]*"[^>]*>\s*(\d+)\s+([^,<]+?)\s*,\s*([^<]+?)\s*<', re.IGNORECASE)
+_SHIFT_ROW = re.compile(
+    r">\s*(\d+)\s*</td>\s*<td[^>]*>\s*(\d+)\s*</td>\s*"
+    r"<td[^>]*>\s*(\d{1,2}:\d{2})\s*/\s*\d{1,2}:\d{2}\s*</td>\s*"
+    r"<td[^>]*>\s*(\d{1,2}:\d{2})\s*/\s*\d{1,2}:\d{2}\s*</td>",
+    re.IGNORECASE,
+)
 
 LINES_NOTE = (
     "Lines L1–L4 and pairs D1–D3 are read from each game's shift chart: forwards grouped by shared "
@@ -77,6 +93,112 @@ def _secs(clock: Any) -> int | None:
         return int(minutes) * 60 + int(seconds)
     except ValueError:
         return None
+
+
+def _norm_token(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+
+
+def _spot_last(spot: dict[str, Any]) -> str:
+    last = spot.get("lastName")
+    if isinstance(last, dict):
+        last = last.get("default")
+    return _norm_token(last)
+
+
+def _chart_reach(rows: list[dict[str, Any]]) -> dict[int, tuple[int, int]]:
+    """How far each player's shifts have been published, as ``(period, end seconds)``."""
+    reach: dict[int, tuple[int, int]] = {}
+    for row in rows:
+        if _int(row.get("typeCode"), SHIFT_TYPE) != SHIFT_TYPE:
+            continue
+        pid = _int(row.get("playerId"))
+        end = _secs(row.get("endTime"))
+        period = _int(row.get("period"))
+        if not pid or end is None or period < 1:
+            continue
+        reach[pid] = max(reach.get(pid, (0, -1)), (period, end))
+    return reach
+
+
+def toi_report_urls(game_id: int) -> tuple[str, str]:
+    """Visitor and home time-on-ice reports for an NHL game id."""
+    text = f"{int(game_id):010d}"
+    start = int(text[:4])
+    season = f"{start}{start + 1}"
+    number = text[-6:]
+    return (
+        NHL_TOI_URL.format(season=season, side="V", number=number),
+        NHL_TOI_URL.format(season=season, side="H", number=number),
+    )
+
+
+def shifts_from_toi_report(html: str, spots: list[dict[str, Any]], team_id: int) -> list[dict[str, Any]]:
+    """Shift rows from one club's HTML time-on-ice report, keyed by NHL player id.
+
+    The report names skaters as ``sweater LAST, FIRST``. Sweater plus last name
+    matches the play-by-play roster. Unmatched skaters are left out.
+    """
+    if not html or not team_id:
+        return []
+    index: dict[tuple[int, str], int] = {}
+    for spot in spots:
+        if _int(spot.get("teamId")) != team_id:
+            continue
+        sweater = _int(spot.get("sweaterNumber"))
+        last = _spot_last(spot)
+        pid = _int(spot.get("playerId"))
+        if sweater and last and pid:
+            index[(sweater, last)] = pid
+    rows: list[dict[str, Any]] = []
+    for heading in _PLAYER_HEADING.finditer(html):
+        pid = index.get((_int(heading.group(1)), _norm_token(heading.group(2))))
+        if not pid:
+            continue
+        block_end = html.find('class="playerHeading', heading.end())
+        block = html[heading.end() : block_end if block_end != -1 else None]
+        for number, period, start, end in _SHIFT_ROW.findall(block):
+            del number
+            rows.append(
+                {
+                    "typeCode": SHIFT_TYPE,
+                    "playerId": pid,
+                    "period": int(period),
+                    "startTime": start,
+                    "endTime": end,
+                }
+            )
+    return rows
+
+
+def merge_shift_charts(shifts: dict[str, Any] | None, extra: list[dict[str, Any]]) -> dict[str, Any]:
+    """Keep each player's shifts from whichever chart reaches further into the game.
+
+    A player published in the HTML report is replaced wholesale, because that
+    report lists every shift from the opening faceoff through the latest one.
+    """
+    base = [row for row in ((shifts or {}).get("data") or []) if isinstance(row, dict)]
+    if not extra:
+        return shifts if isinstance(shifts, dict) else {"data": base}
+    fresh = _chart_reach(extra)
+    stale = _chart_reach(base)
+    replace = {pid for pid, reach in fresh.items() if reach > stale.get(pid, (0, -1))}
+    if not replace:
+        return shifts if isinstance(shifts, dict) else {"data": base}
+    kept = [row for row in base if _int(row.get("playerId")) not in replace]
+    added = [row for row in extra if _int(row.get("playerId")) in replace]
+    return {"data": kept + added}
+
+
+def fetch_text(url: str, timeout: float = 15.0) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html, */*"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("latin-1", "replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Live feed HTTP {exc.code} for {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Live feed unreachable: {exc.reason}") from exc
 
 
 def _player_name(spot: dict[str, Any]) -> str:
@@ -473,8 +595,9 @@ def game_lines(pbp: dict[str, Any], shifts: dict[str, Any], *, playoffs: bool = 
 class LineSource:
     """NHL schedule, play-by-play and shift charts, matched to ESPN finals and cached."""
 
-    def __init__(self, fetch: FetchJson = fetch_json) -> None:
+    def __init__(self, fetch: FetchJson = fetch_json, fetch_text: FetchText = fetch_text) -> None:
         self._fetch = fetch
+        self._fetch_text = fetch_text
         self._lock = threading.Lock()
         self._schedule: dict[str, tuple[float, dict[tuple[str, str], tuple[int, int]]]] = {}
         self._games: dict[int, dict[str, Any]] = {}
@@ -486,6 +609,31 @@ class LineSource:
     @property
     def last_error(self) -> str | None:
         return self._last_error
+
+    def _report_shifts(self, game_id: int, pbp: dict[str, Any]) -> list[dict[str, Any]]:
+        """Shifts from the HTML reports. A missing report leaves the JSON chart in place."""
+        home_id = _int((pbp.get("homeTeam") or {}).get("id"))
+        away_id = _int((pbp.get("awayTeam") or {}).get("id"))
+        spots = [spot for spot in (pbp.get("rosterSpots") or []) if isinstance(spot, dict)]
+        if not spots or not home_id or not away_id:
+            return []
+
+        def one(url: str, team_id: int) -> list[dict[str, Any]]:
+            try:
+                html = self._fetch_text(url)
+            except Exception:  # noqa: BLE001 - the JSON chart still covers this club
+                return []
+            try:
+                return shifts_from_toi_report(html, spots, team_id)
+            except Exception:  # noqa: BLE001 - a broken report must not blank the chiclet
+                return []
+
+        rows: list[dict[str, Any]] = []
+        urls = toi_report_urls(game_id)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            for result in pool.map(lambda item: one(*item), zip(urls, (away_id, home_id), strict=True)):
+                rows.extend(result)
+        return rows
 
     def _day_games(self, day: str, now: float) -> dict[tuple[str, str], tuple[int, int]]:
         """``(away, home) -> (nhl game id, game type)`` for one Eastern date."""
@@ -573,6 +721,7 @@ class LineSource:
                 shifts = self._fetch(f"{NHL_SHIFTS_URL.format(game_id=gid)}&limit=2000")
                 pbp = pbp if isinstance(pbp, dict) else {}
                 shifts = shifts if isinstance(shifts, dict) else {}
+                shifts = merge_shift_charts(shifts, self._report_shifts(gid, pbp))
                 with self._lock:
                     self._live_raw[gid] = (now, pbp, shifts)
         except Exception as exc:  # noqa: BLE001 - the chiclet still renders without lines
